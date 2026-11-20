@@ -147,3 +147,45 @@ class PvCollector(private val expected: Int) {
         return complete
     }
 }
+
+/**
+ * Keeps arrows from jumping back and forth. At low depths an engine often
+ * switches its best move for one iteration and then switches back; showing
+ * each switch makes the arrows flicker. A change of the arrows' moves (the
+ * first move of each line with an arrow, and the best line's next moves) is
+ * shown once two iterations in a row agree on it, or at once from depth
+ * DEEP (iterations are slow there, and a change means something). Scores
+ * and depth move with the lines they belong to.
+ */
+class LineStabilizer(private val arrows: Int, private val pathPlies: Int) {
+    private var shown: List<PvLine>? = null
+    private var pendingKey: String? = null
+
+    fun reset() { shown = null; pendingKey = null }
+
+    /** The lines to show for this iteration (the last shown ones, while a change is unconfirmed). */
+    fun offer(lines: List<PvLine>, finished: Boolean): List<PvLine> {
+        val cur = shown
+        val key = key(lines)
+        val depth = lines.firstOrNull()?.depth ?: 0
+        if (cur == null || key == key(cur) || finished || depth >= DEEP || key == pendingKey) {
+            shown = lines
+            pendingKey = null
+            return lines
+        }
+        pendingKey = key
+        return cur
+    }
+
+    private fun key(lines: List<PvLine>): String {
+        val sb = StringBuilder()
+        for ((i, l) in lines.take(maxOf(1, arrows)).withIndex()) {
+            sb.append(l.pv.take(if (i == 0) pathPlies + 1 else 1).joinToString(" ")).append('|')
+        }
+        return sb.toString()
+    }
+
+    companion object {
+        const val DEEP = 18
+    }
+}

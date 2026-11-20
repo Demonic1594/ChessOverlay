@@ -4,6 +4,7 @@ import io.github.chessoverlay.DebugLog
 import io.github.chessoverlay.chess.Board
 import io.github.chessoverlay.engine.AnalysisUpdate
 import io.github.chessoverlay.engine.EngineHost
+import io.github.chessoverlay.engine.LineStabilizer
 import io.github.chessoverlay.engine.PvLine
 import io.github.chessoverlay.vision.BoardTracker
 import io.github.chessoverlay.vision.Img
@@ -23,6 +24,18 @@ class Analyst(
     var thinkMs = 0L
     var minConfidence = 0.5f
     var annotate = true
+    /** What the arrows show (for LineStabilizer): arrows drawn, moves of the best line drawn after the first. */
+    var arrows = 2
+    var pathPlies = 2
+
+    /**
+     * Engine results arrive on the engine thread while new positions start
+     * on the worker: both go through this lock, and a result counts only if
+     * its request is still the current one, so the lines of one position
+     * never appear on the next.
+     */
+    private val lock = Any()
+    private var stabilizer = LineStabilizer(arrows, pathPlies)
 
     /** null = work it out; true/false = White/Black to move. */
     @Volatile var sideOverride: Boolean? = null
@@ -38,7 +51,7 @@ class Analyst(
     private data class Pending(val move: String, val before: Board, val bestBefore: PvLine, val whiteBefore: Boolean)
 
     /** Engine results, from the engine thread. */
-    fun onEngine(u: AnalysisUpdate) {
+    fun onEngine(u: AnalysisUpdate): Unit = synchronized(lock) {
         if (u.id != requestId) return
         val s = state
         val top = u.lines.firstOrNull()
@@ -57,7 +70,8 @@ class Analyst(
         // Lines arriving end "Analysing…" and "restarting…"; other messages stay until the next position.
         val passing = s.status == ANALYSING || s.status.startsWith("Engine stopped")
         val status = if (passing && u.lines.isNotEmpty()) "" else s.status
-        publish(s.copy(status = status, searching = !u.finished, lines = u.lines, lastMove = mark))
+        val shown = stabilizer.offer(u.lines, u.finished)
+        publish(s.copy(status = status, searching = !u.finished, lines = shown, lastMove = mark))
     }
 
     /** The game on screen; read it only from the thread that calls look(). */
@@ -88,9 +102,11 @@ class Analyst(
             if (auto && tracker.corners != null && ++lostReads >= 3) {
                 lostReads = 0
                 tracker.reset()
-                requestId = -1
-                engine.stop()
-                publish(OverlayState(status = "Board gone; looking for it…"))
+                synchronized(lock) {
+                    requestId = -1
+                    engine.stop()
+                    publish(OverlayState(status = "Board gone; looking for it…"))
+                }
             }
             if (!auto) publish(state.copy(status = "No clear board found (${(rec.confidence * 100).toInt()}% sure)"))
             return Look.NO_BOARD
@@ -98,6 +114,13 @@ class Analyst(
         lostReads = 0
         return when (val r = tracker.accept(img, rec, sideOverride, strict = auto)) {
             is BoardTracker.Result.Same -> {
+                // Same position, but the board may have been turned round or moved a little.
+                synchronized(lock) {
+                    val s = state
+                    if (s.board != null && (s.blackAtBottom != tracker.blackAtBottom || moved(s.corners, tracker.corners))) {
+                        publish(s.copy(blackAtBottom = tracker.blackAtBottom, corners = tracker.corners))
+                    }
+                }
                 if (!auto && state.board == null) start(tracker.board!!, tracker.whiteToMove, null, null, true)
                 else if (!auto && state.status.isNotEmpty() && state.status != ANALYSING) publish(state.copy(status = ""))
                 Look.SAME
@@ -125,7 +148,8 @@ class Analyst(
         start(b, white, null, null, white)
     }
 
-    private fun start(board: Board, white: Boolean, move: String?, previous: Board?, previousWhite: Boolean) {
+    private fun start(board: Board, white: Boolean, move: String?, previous: Board?, previousWhite: Boolean): Unit = synchronized(lock) {
+        stabilizer = LineStabilizer(arrows, pathPlies)
         val bestBefore = best
         pendingGrade = if (annotate && move != null && previous != null && bestBefore != null &&
             previousWhite != white) Pending(move, previous, bestBefore, previousWhite) else null
@@ -147,12 +171,25 @@ class Analyst(
 
     fun stop() = engine.stop()
 
-    fun status(s: String) = publish(state.copy(status = s))
+    /** Drop the board (it moved: the screen turned); show `why` until it is found again. */
+    fun forget(why: String) {
+        tracker.reset()
+        synchronized(lock) {
+            requestId = -1
+            engine.stop()
+            publish(OverlayState(status = why))
+        }
+    }
+
+    fun status(s: String) = synchronized(lock) { publish(state.copy(status = s)) }
 
     private fun publish(s: OverlayState) {
         state = s
         onState(s)
     }
+
+    private fun moved(a: List<FloatArray>?, b: List<FloatArray>?): Boolean =
+        a == null || b == null || a.indices.any { kotlin.math.abs(a[it][0] - b[it][0]) > 2 || kotlin.math.abs(a[it][1] - b[it][1]) > 2 }
 
     private fun grade(p: Pending, after: PvLine, whiteNow: Boolean): MoveMark {
         val sq = Board.squareOf(p.move.substring(2, 4))

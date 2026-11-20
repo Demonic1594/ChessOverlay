@@ -17,27 +17,52 @@ import io.github.chessoverlay.vision.Img
  */
 class ScreenSource(
     projection: MediaProjection,
-    val width: Int,
-    val height: Int,
+    width: Int,
+    height: Int,
     densityDpi: Int,
     private val handler: Handler,
 ) : AutoCloseable {
+    var width = width
+        private set
+    var height = height
+        private set
     private val lock = Object()
     private var latest: Image? = null
     @Volatile var latestTime = 0L
         private set
 
-    private val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 3)
-    private val display: VirtualDisplay
+    private var reader = newReader(width, height)
+    private val display: VirtualDisplay = projection.createVirtualDisplay("chessoverlay", width, height, densityDpi,
+        DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader.surface, null, null)
 
-    init {
-        reader.setOnImageAvailableListener({ ir ->
-            val img = try { ir.acquireLatestImage() } catch (_: Exception) { null } ?: return@setOnImageAvailableListener
-            val t = SystemClock.uptimeMillis()
-            synchronized(lock) { latest?.close(); latest = img; latestTime = t }
-        }, handler)
-        display = projection.createVirtualDisplay("chessoverlay", width, height, densityDpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader.surface, null, null)
+    private fun newReader(w: Int, h: Int): ImageReader =
+        ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 3).apply {
+            setOnImageAvailableListener({ ir ->
+                val img = try { ir.acquireLatestImage() } catch (_: Exception) { null } ?: return@setOnImageAvailableListener
+                val t = SystemClock.uptimeMillis()
+                synchronized(lock) {
+                    // A frame from a reader replaced by resize() is dropped.
+                    if (ir !== reader) { img.close(); return@setOnImageAvailableListener }
+                    latest?.close(); latest = img; latestTime = t
+                }
+            }, handler)
+        }
+
+    /**
+     * Capture at a new size (the screen turned). Without this the mirrored
+     * screen would be squeezed into the old size and nothing would line up.
+     */
+    fun resize(w: Int, h: Int, densityDpi: Int) {
+        val old: ImageReader
+        synchronized(lock) {
+            old = reader
+            reader = newReader(w, h)
+            latest?.close(); latest = null
+            width = w; height = h
+        }
+        display.resize(w, h, densityDpi)
+        display.surface = reader.surface
+        old.close()
     }
 
     /** The newest frame as an RGB image, or null if none has arrived yet. */

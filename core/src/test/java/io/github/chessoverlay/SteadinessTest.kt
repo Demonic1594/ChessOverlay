@@ -147,3 +147,32 @@ class SteadinessTest {
         assertTrue(now.foldTop > 0f && now.hits.all { it.y1 <= now.foldTop })
     }
 }
+
+class LineStabilizerTest {
+    private fun lines(depth: Int, vararg first: String) =
+        first.mapIndexed { i, m -> io.github.chessoverlay.engine.PvLine(i + 1, depth, 10, null, listOf(m, "a7a6", "b1c3")) }
+
+    @Test fun aOneIterationSwitchIsNotShown() {
+        val s = io.github.chessoverlay.engine.LineStabilizer(arrows = 2, pathPlies = 2)
+        org.junit.Assert.assertEquals("e2e4", s.offer(lines(8, "e2e4", "d2d4"), false)[0].pv[0])
+        // Depth 9 flips to d4 for one iteration, depth 10 back to e4: the arrows never move.
+        org.junit.Assert.assertEquals("e2e4", s.offer(lines(9, "d2d4", "e2e4"), false)[0].pv[0])
+        val ten = s.offer(lines(10, "e2e4", "d2d4"), false)
+        org.junit.Assert.assertEquals("e2e4", ten[0].pv[0])
+        org.junit.Assert.assertEquals(10, ten[0].depth)   // new scores and depth still come through
+    }
+
+    @Test fun aLastingChangeIsShownOnItsSecondIteration() {
+        val s = io.github.chessoverlay.engine.LineStabilizer(arrows = 2, pathPlies = 2)
+        s.offer(lines(8, "e2e4", "d2d4"), false)
+        org.junit.Assert.assertEquals("e2e4", s.offer(lines(9, "c2c4", "e2e4"), false)[0].pv[0])
+        org.junit.Assert.assertEquals("c2c4", s.offer(lines(10, "c2c4", "e2e4"), false)[0].pv[0])
+    }
+
+    @Test fun deepChangesAndFinalResultsAreShownAtOnce() {
+        val s = io.github.chessoverlay.engine.LineStabilizer(arrows = 2, pathPlies = 2)
+        s.offer(lines(17, "e2e4", "d2d4"), false)
+        org.junit.Assert.assertEquals("g1f3", s.offer(lines(18, "g1f3", "e2e4"), false)[0].pv[0])
+        org.junit.Assert.assertEquals("d2d4", s.offer(lines(12, "d2d4", "e2e4"), true)[0].pv[0])
+    }
+}

@@ -184,9 +184,10 @@ class OverlayService : Service() {
 
     /** Recognizer and engine start on the worker thread (they take a moment). */
     private fun setUp() {
-        val models = ModelStore(filesDir)
+        val models = ModelStore(this)
         if (!models.ready) { postState(OverlayState(status = "Download the recognition models in the app first")); return }
         postState(OverlayState(status = "Loading the recognizer…"))
+        models.prepare()
         val rec = Recognizer(models.board, models.locator, threads = 2)
         recognizer = rec
         val reg = EngineRegistry(this)
@@ -203,6 +204,8 @@ class OverlayService : Service() {
             thinkMs = prefs.thinkMs.toLong()
             minConfidence = prefs.minConfidence
             annotate = prefs.annotate
+            arrows = prefs.arrows
+            pathPlies = prefs.pathPlies
         }
         analyst = a
         host.start()
@@ -381,14 +384,18 @@ class OverlayService : Service() {
                     }
                 }
             }
+            // The new state (if any) was posted first; now the arrows may show again.
+            main.post { draw?.blank = false }
             busy = false
         }
     }
 
     /**
-     * Hide what covers the board (the board layer; the card too if it lies
-     * over the board, or always with `hideCard`), wait for a frame without
-     * it, grab, show again.
+     * Clear what covers the board (the board layer is blanked; the card is
+     * hidden if it lies over the board, or always with `hideCard`), wait for
+     * a frame without it, grab. The card comes back at once; the board layer
+     * only once the result is in (see read), so a move's old arrows do not
+     * flash back before the new ones.
      */
     private fun cleanCapture(hideCard: Boolean, then: (Img?) -> Unit) {
         val region = analyst?.board?.region()
@@ -399,7 +406,7 @@ class OverlayService : Service() {
         val hideCard = hideCard || overBoard
         if (!hideDraw && !hideCard) { then(screen?.grab()); return }
         main.post {
-            if (hideDraw) draw?.visibility = View.INVISIBLE
+            if (hideDraw) draw?.blank = true
             if (hideCard) card?.visibility = View.INVISIBLE
             val hiddenAt = SystemClock.uptimeMillis()
             work.post(object : Runnable {
@@ -409,10 +416,7 @@ class OverlayService : Service() {
                     if (s == null) { then(null); return }
                     if (s.latestTime > hiddenAt + 16 || waited >= HIDE_WAIT_MS) {
                         val img = s.grab()
-                        main.post {
-                            if (shown) draw?.visibility = View.VISIBLE
-                            card?.visibility = View.VISIBLE
-                        }
+                        main.post { card?.visibility = View.VISIBLE }
                         then(img)
                     } else {
                         waited += 16
@@ -465,6 +469,36 @@ class OverlayService : Service() {
         card = cv
         cardLp = clp
         updateButtons()
+    }
+
+    /**
+     * The phone was turned (or the screen otherwise changed size): capture at
+     * the new size, and find the board again (it is somewhere else now).
+     */
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val m = DisplayMetrics()
+        @Suppress("DEPRECATION")
+        wm.defaultDisplay.getRealMetrics(m)
+        if (m.widthPixels == screenW && m.heightPixels == screenH) return
+        screenW = m.widthPixels
+        screenH = m.heightPixels
+        DebugLog.i(TAG, "screen now ${screenW}x$screenH")
+        work.post {
+            guarded("resize") {
+                screen?.resize(m.widthPixels, m.heightPixels, m.densityDpi)
+                analyst?.forget("Screen turned; looking for the board…")
+                watcher.reset()
+                lastRead = 0L; retryAt = 0L; misses = 0
+            }
+        }
+        placedFor = null
+        val v = card ?: return
+        val lp = cardLp ?: return
+        lp.width = cardWidth()
+        lp.x = lp.x.coerceIn(0, maxOf(0, screenW - lp.width))
+        lp.y = lp.y.coerceIn(0, maxOf(0, screenH - (60 * density).toInt()))
+        runCatching { wm.updateViewLayout(v, lp) }
     }
 
     private fun toggleAuto() {

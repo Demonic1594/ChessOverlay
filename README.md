@@ -24,7 +24,21 @@ responsible for any penalty, ban or other consequence of misusing this app.
 - **Board recognition** from the screen: finds the board anywhere on screen,
   reads all 64 squares and which side is at the bottom. Kotlin port of
   [chessimg2pos](https://github.com/mdicio/chessimg2pos) v2 (MIT) on ONNX
-  Runtime; its models (about 170 MB) are downloaded once from within the app.
+  Runtime. The models are built into the APK, the board model quantized to
+  int8 (`tools/quantize_models.py`): the same reading as the original on
+  every square of 300 benchmark boards, about twice as fast, 38 MB instead
+  of 125 MB. (A build without them downloads the originals once.)
+- **Reading in the light of the game**: during a game a new position can
+  only follow the last one by a move, or a move each, so the most likely
+  position the game can reach is taken when the picture allows it (a piece
+  hidden under a site's arrow, or misread, cannot vanish or turn into
+  another piece). Which way round the board is drawn comes from the model
+  checked against the position (pawns and kings stay near their own side);
+  a board turned round, by hand or by a site that turns it after every
+  move, is the same game; the start position has White to move whichever
+  side is at the bottom; turning the phone finds the board again at the new
+  screen size. On a benchmark of 30 games with site arrows and highlights
+  over pieces: 930 of 930 positions right (904 without this).
 - **Engines**: Smotherfish built in (Stockfish-based); any arm64 UCI engine
   binary you add (Stockfish, Komodo, lc0 with a Maia network set as its
   `WeightsFile`, …); and engine apps that offer engines to chess GUIs (the
@@ -55,9 +69,13 @@ responsible for any penalty, ban or other consequence of misusing this app.
   side to move. A small change that no move explains must be read the same
   way twice; misreads never replace the analysis.
 - **Steady display**: engine lines are shown as whole iterations (every
-  line at one depth), from depth 8; the same position's updates reach the
-  screen about twice a second; the card keeps its size from move to move,
-  showing the last lines faded until the new ones arrive.
+  line at one depth), from depth 8; below depth 18 a change of the arrows is
+  shown only when two iterations agree (an engine often switches for one
+  iteration and back); the same position's updates reach the screen about
+  twice a second; the card keeps its size from move to move, showing the
+  last lines faded until the new ones arrive; while a move is read the
+  arrows stay away, so the old ones never flash back before the new ones.
+  Results of an old position can never land on a new one.
 - **Stability**: the engine runs under a supervisor that restarts it if it
   stops (crash, or killed by Android), resends its options and resumes the
   analysis; a position that crashes the engine twice is skipped. Errors are
@@ -67,7 +85,8 @@ responsible for any penalty, ban or other consequence of misusing this app.
 
 1. Install the APK (see Builds below). It targets Android API 28 on purpose
    (see Notes), so Android may warn that it was built for an older version.
-2. Tap **Download** under Recognition models (once, about 170 MB).
+2. Builds from CI carry the recognition models. A local build without them
+   asks to **Download** them once (about 170 MB).
 3. Pick an engine; **Options** edits its settings.
 4. Tap **Initialize**: allow drawing over other apps, then screen capture.
 5. Open the app with the board. The card: ▶ analyse now · A auto mode ·
@@ -88,20 +107,24 @@ to bundle it.
 ## Tests
 
 The code is split in two modules: `core` (plain Kotlin: chess rules, UCI
-parsing, game tracking and the overlay's layout as plain shapes) and `app`
-(Android: screen capture, recognizer, engine processes, views).
+parsing, game tracking, reading boards in the light of the game, and the
+overlay's layout as plain shapes) and `app` (Android: screen capture,
+recognizer, engine processes, views).
 
-`./gradlew :core:test` runs chess logic (legality, notation), game tracking
-and change detection (including that the overlay's own drawing is never
-taken for a move), the card's layout (nothing runs past it at any width),
-and renders previews of the overlay on a phone-sized board to
-`core/build/preview/*.png`.
+`./gradlew :core:test` runs chess logic (legal moves, notation), game
+tracking and change detection (including that the overlay's own drawing is
+never taken for a move, and a simulation of gliding pieces: read soon after
+they stop, never in flight), orientation and game-aware decoding (misread
+squares, boards turned round, undo), steady lines, the card's layout
+(nothing runs past it at any width), and renders previews of the overlay on
+a phone-sized board to `core/build/preview/*.png`.
 
 `./gradlew testDebugUnitTest` runs (on the build machine):
 - UCI parsing, and with `ENGINE=/path/to/engine` a real analysis;
 - the recognizer against chessimg2pos (Python) on the same images: Pillow's
   resize reproduced to within 1 level, and with `MODELS=/folder/with/onnx`
-  the same positions, orientation and board corners (within 2 px);
+  the same positions, orientation and board corners (within 2 px), and with
+  `QMODELS` the bundled int8 model reading every image as the original does;
 - the engine supervisor (a killed engine restarts and the analysis
   finishes; a position that kills it is skipped).
 

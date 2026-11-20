@@ -41,7 +41,7 @@ class MainActivity : Activity() {
         DebugLog.init(filesDir)
         prefs = Prefs(this)
         registry = EngineRegistry(this)
-        models = ModelStore(filesDir)
+        models = ModelStore(this)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18f), dp(12f), dp(18f), dp(24f))
@@ -172,7 +172,10 @@ class MainActivity : Activity() {
     }
 
     private fun updateModels() {
-        if (models.ready) {
+        if (models.isBundled) {
+            modelStatus.text = "Built into this app (chessimg2pos v2, MIT licence; board model in int8)."
+            modelButton.visibility = android.view.View.GONE
+        } else if (models.ready) {
             modelStatus.text = "Ready."
             modelButton.text = "Download again"
         } else {

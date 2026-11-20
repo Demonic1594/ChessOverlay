@@ -39,17 +39,26 @@ class DrawView(ctx: Context, private val style: () -> BoardStyle) : View(ctx) {
         }
 
     /**
+     * Draw nothing for now (main thread). While the board is being read the
+     * arrows go away, and come back only if the position did not change:
+     * the old arrows never reappear for a moment before the new ones.
+     */
+    var blank = false
+        set(v) { if (field != v) { field = v; invalidate() } }
+
+    /**
      * Screen pixels drawn now, and for PREVIOUS_MS after a change also those
      * of the drawing before (a captured frame may still show it). Any thread.
      */
     fun cover(): BoardTracker.Cover? {
-        if (visibility != VISIBLE) return null
+        if (visibility != VISIBLE || blank) return null
         val old = previous.takeIf { android.os.SystemClock.uptimeMillis() - replacedAt < PREVIOUS_MS }
         return ShapeCover.union(current, old)
     }
 
     override fun onDraw(c: Canvas) {
         // Shapes are in captured-screen pixels; this view may not start at (0, 0).
+        if (blank) return
         getLocationOnScreen(loc)
         c.save()
         c.translate(-loc[0].toFloat(), -loc[1].toFloat())

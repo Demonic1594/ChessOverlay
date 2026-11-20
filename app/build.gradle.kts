@@ -44,6 +44,8 @@ android {
     buildFeatures { buildConfig = true }
     // On-device tests reuse the unit tests' images.
     sourceSets["androidTest"].assets.srcDirs("src/test/resources")
+    // The bundled models are copied out once; storing them uncompressed makes that a plain copy.
+    androidResources { noCompress += "onnx" }
     packaging {
         // Engines ship as lib*.so so that Android installs them as
         // executable files in nativeLibraryDir; they must stay extracted.
