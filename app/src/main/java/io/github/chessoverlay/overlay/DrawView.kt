@@ -43,8 +43,9 @@ class DrawView(ctx: Context, private val prefs: Prefs) : View(ctx) {
             val board = s.board
             if (board != null) {
                 s.playedMove?.let { drawPlayed(c, it, s, corners, sqSize) }
-                drawPath(c, s, board, corners, sqSize)
+                drawPath(c, s, board, corners, sqSize, badges = false)
                 drawArrows(c, s, board, corners, sqSize)
+                drawPath(c, s, board, corners, sqSize, badges = true)
                 s.lastMove?.let { drawMark(c, it, s, corners, sqSize) }
             }
             if (prefs.evalBar && s.lines.isNotEmpty()) drawEvalBar(c, s, corners, sqSize)
@@ -90,7 +91,7 @@ class DrawView(ctx: Context, private val prefs: Prefs) : View(ctx) {
      * move to play now, on the main arrow), in a white badge for White's
      * moves and a dark one for Black's, placed two thirds along its arrow.
      */
-    private fun drawPath(c: Canvas, s: OverlayState, board: Board, k: List<FloatArray>, sq: Float) {
+    private fun drawPath(c: Canvas, s: OverlayState, board: Board, k: List<FloatArray>, sq: Float, badges: Boolean) {
         val pv = s.lines.firstOrNull()?.pv ?: return
         val plies = min(prefs.pathPlies + 1, pv.size)
         if (prefs.pathPlies <= 0 || plies <= 0) return
@@ -101,11 +102,12 @@ class DrawView(ctx: Context, private val prefs: Prefs) : View(ctx) {
             val from = Board.squareOf(m.substring(0, 2)); val to = Board.squareOf(m.substring(2, 4))
             if (from < 0 || to < 0) break
             val a = centre(from, s, k); val b = centre(to, s, k)
-            if (i > 0) {
-                val color = if (white) 0xB0F5F5F5.toInt() else 0xB0202020.toInt()
-                arrow(c, a, b, color, sq * 0.08f)
+            if (!badges && i > 0) {
+                // A contrasting outline keeps light arrows visible on light squares.
+                arrow(c, a, b, if (white) 0xC0202020.toInt() else 0xC0F5F5F5.toInt(), sq * 0.12f)
+                arrow(c, a, b, if (white) 0xF0F5F5F5.toInt() else 0xF0202020.toInt(), sq * 0.07f)
             }
-            badge(c, PointF(a.x + (b.x - a.x) * 0.62f, a.y + (b.y - a.y) * 0.62f), "${i + 1}", white, sq)
+            if (badges) badge(c, PointF(a.x + (b.x - a.x) * 0.62f, a.y + (b.y - a.y) * 0.62f), "${i + 1}", white, sq)
             white = !white
         }
     }
@@ -203,9 +205,10 @@ class DrawView(ctx: Context, private val prefs: Prefs) : View(ctx) {
         val tw = text.measureText(txt) + 8f
         val atBottom = whiteAtBottom == (score >= 0)
         val boxTop = if (atBottom) bottom - text.textSize - 8f else top
+        val cx = max(x0 + w / 2, loc[0] + tw / 2)  // not past the screen's left edge
         fill.color = 0xD0000000.toInt()
-        c.drawRect(x0 + w / 2 - tw / 2, boxTop, x0 + w / 2 + tw / 2, boxTop + text.textSize + 8f, fill)
-        c.drawText(txt, x0 + w / 2, boxTop + text.textSize + 2f, text)
+        c.drawRect(cx - tw / 2, boxTop, cx + tw / 2, boxTop + text.textSize + 8f, fill)
+        c.drawText(txt, cx, boxTop + text.textSize + 2f, text)
         text.textAlign = Paint.Align.LEFT
     }
 
