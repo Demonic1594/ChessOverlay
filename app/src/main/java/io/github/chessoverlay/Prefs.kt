@@ -19,12 +19,12 @@ class Prefs(ctx: Context) {
 
     /** Arrows drawn: the first move of the best N lines. */
     var arrows: Int
-        get() = p.getInt("arrows", 3)
+        get() = p.getInt("arrows", 2)
         set(v) = p.edit().putInt("arrows", v.coerceIn(0, 5)).apply()
 
     /** Moves of the best line drawn as a numbered path after the first (0 = off). */
     var pathPlies: Int
-        get() = p.getInt("path_plies", 4)
+        get() = p.getInt("path_plies", 2)
         set(v) = p.edit().putInt("path_plies", v.coerceIn(0, 10)).apply()
 
     /** Analysis time per position in ms; 0 = until the position changes. */
@@ -41,7 +41,7 @@ class Prefs(ctx: Context) {
         set(v) = p.edit().putBoolean("lines_panel", v).apply()
 
     var arrowLabels: Boolean
-        get() = p.getBoolean("arrow_labels", true)
+        get() = p.getBoolean("arrow_labels", false)
         set(v) = p.edit().putBoolean("arrow_labels", v).apply()
 
     /** Mark the last move played (best/good/inaccuracy/mistake/blunder) in auto mode. */
@@ -54,10 +54,19 @@ class Prefs(ctx: Context) {
         get() = p.getBoolean("auto_start", true)
         set(v) = p.edit().putBoolean("auto_start", v).apply()
 
-    /** Seconds between screen reads in auto mode. */
-    var autoSeconds: Float
-        get() = p.getFloat("auto_seconds", 1.5f)
-        set(v) = p.edit().putFloat("auto_seconds", v.coerceIn(0.5f, 10f)).apply()
+    /** Where the user put the floating card (screen pixels); y < 0 = not moved, it follows the board. */
+    var cardX: Int
+        get() = p.getInt("card_x", -1)
+        set(v) = p.edit().putInt("card_x", v).apply()
+
+    var cardY: Int
+        get() = p.getInt("card_y", -1)
+        set(v) = p.edit().putInt("card_y", v).apply()
+
+    /** The card shows the evaluation row only. */
+    var cardCollapsed: Boolean
+        get() = p.getBoolean("card_collapsed", false)
+        set(v) = p.edit().putBoolean("card_collapsed", v).apply()
 
     /** Boards whose least certain square is below this are not analysed. */
     var minConfidence: Float

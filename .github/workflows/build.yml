@@ -65,7 +65,7 @@ jobs:
           ls -la models
 
       - name: Unit tests
-        run: MODELS="$GITHUB_WORKSPACE/models" ./gradlew --no-daemon testDebugUnitTest
+        run: MODELS="$GITHUB_WORKSPACE/models" ./gradlew --no-daemon :core:test testDebugUnitTest
 
       - name: Build the APK
         run: ./gradlew --no-daemon assembleRelease
@@ -80,8 +80,18 @@ jobs:
         if: always()
         with:
           name: test-reports
-          path: app/build/reports/tests/
+          path: |
+            app/build/reports/tests/
+            core/build/reports/tests/
           retention-days: 7
+
+      # Renderings of the overlay on a phone-sized board, for review.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: overlay-previews
+          path: core/build/preview/
+          retention-days: 14
 
   # The app's Android-only parts on a real Android system: an x86_64
   # emulator, with Smotherfish built for x86_64 and the models pushed in.

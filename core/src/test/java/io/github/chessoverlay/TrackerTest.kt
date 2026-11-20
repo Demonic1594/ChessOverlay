@@ -60,12 +60,57 @@ class TrackerTest {
         legalityChanges = 0,
     )
 
-    @Test fun signatureSeesMovesOnly() {
+    @Test fun changeDetectionSeesMovesOnly() {
+        val t = BoardTracker()
         val a = Board.fromPlacement(start)
+        assertEquals(64, t.changedSquares(render(a)))  // no board yet
+        t.accept(render(a), rec(a), null)
+        assertEquals(0, t.changedSquares(render(a)))
+        assertEquals(2, t.changedSquares(render(after(start, "e2e4"))))
+        // A crop of the board area with its screen offset gives the same answer.
+        val img = render(after(start, "e2e4"))
+        assertEquals(2, t.changedSquares(img.crop(5, 5, img.w, img.h), 5, 5))
+    }
+
+    /** Overlay drawing on the board must not look like a move; a real move under it still must. */
+    @Test fun overlayDrawingIsMasked() {
+        val t = BoardTracker()
+        val a = Board.fromPlacement(start)
+        t.accept(render(a), rec(a), null)
+        val k = rec(a).corners
+        val g = io.github.chessoverlay.overlay.BoardGeom(k, false)
+        val arrow = io.github.chessoverlay.overlay.Shape.Poly(io.github.chessoverlay.overlay.arrowOutline(
+            listOf(g.centre(Board.squareOf("e2")), g.centre(Board.squareOf("e4"))), g.sq * 0.17f, g.sq * 0.42f, g.sq * 0.27f),
+            0xE61F7AE6.toInt())
+        val cover = io.github.chessoverlay.overlay.ShapeCover(listOf(arrow), 2f)
+        // Paint the arrow's pixels blue, as the screen shows them with the overlay on.
+        fun withArrow(img: Img) = img.also {
+            for (y in 0 until it.h) for (x in 0 until it.w) if (cover.covered(x, y)) it.px[y * it.w + x] = 0x1F7AE6
+        }
+        assertTrue("the arrow alone changes squares", t.changedSquares(withArrow(render(a))) >= 2)
+        assertEquals(0, t.changedSquares(withArrow(render(a)), cover = cover))
+        // e2-e4 played under the arrow: still seen.
+        assertEquals(2, t.changedSquares(withArrow(render(after(start, "e2e4"))), cover = cover))
+        // Squares mostly under a big drawing count as blind, not changed.
+        val blob = io.github.chessoverlay.overlay.Shape.Circle(g.centre(Board.squareOf("d4")).x,
+            g.centre(Board.squareOf("d4")).y, g.sq * 0.6f, 0)
+        val blind = io.github.chessoverlay.overlay.ShapeCover(listOf(blob), 0f)
+        val (xs, ys) = t.points()!!
+        assertEquals(1, t.compare(BoardTracker.sample(render(a), xs, ys, 0, 0), blind).blind)
+    }
+
+    /** A misread keeps the last good read, so the change is seen again and re-read. */
+    @Test fun misreadKeepsReference() {
+        val t = BoardTracker()
+        val a = Board.fromPlacement(start)
+        t.accept(render(a), rec(a), null)
         val b = after(start, "e2e4")
-        val sa = BoardTracker.signature(render(a), rec(a).corners)
-        assertEquals(0, BoardTracker.changedSquares(sa, BoardTracker.signature(render(a), rec(a).corners)))
-        assertEquals(2, BoardTracker.changedSquares(sa, BoardTracker.signature(render(b), rec(b).corners)))
+        val bad = rec(b).copy(placement = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPPPPPP/RNBQKBNR")  // 17 white pieces
+        assertTrue(t.accept(render(b), bad, null) is BoardTracker.Result.Invalid)
+        assertEquals(start, t.board!!.placement())
+        assertEquals(2, t.changedSquares(render(b)))
+        assertEquals("e2e4", (t.accept(render(b), rec(b), null) as BoardTracker.Result.Position).move)
+        assertEquals(0, t.changedSquares(render(b)))
     }
 
     @Test fun followsAGame() {
@@ -76,12 +121,12 @@ class TrackerTest {
         assertEquals(true, (first as BoardTracker.Result.Position).whiteToMove)
 
         // Same picture: nothing changed, no recognition needed.
-        assertFalse(t.changed(render(a)))
+        assertEquals(0, t.changedSquares(render(a)))
         assertEquals(BoardTracker.Result.Same, t.accept(render(a), rec(a), null))
 
         // 1. e4: the tracker finds the move and that Black is to move.
         val b = after(start, "e2e4")
-        assertTrue(t.changed(render(b)))
+        assertEquals(2, t.changedSquares(render(b)))
         val second = t.accept(render(b), rec(b), null) as BoardTracker.Result.Position
         assertEquals("e2e4", second.move)
         assertEquals(false, second.whiteToMove)

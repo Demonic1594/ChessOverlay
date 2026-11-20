@@ -11,16 +11,6 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-/** A recognised board. Corners are TL, TR, BR, BL in image pixels, as drawn. */
-data class Recognition(
-    val placement: String,          // FEN placement from White's side
-    val blackAtBottom: Boolean,
-    val confidence: Float,          // probability of the least certain square
-    val orientationConfidence: Float,
-    val corners: List<FloatArray>,
-    val legalityChanges: Int,
-)
-
 /**
  * Chess board recognition: a Kotlin port of chessimg2pos v2 (MIT, Mattia
  * Dicio, github.com/mdicio/chessimg2pos), using its ONNX models:

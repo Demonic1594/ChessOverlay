@@ -9,22 +9,6 @@ import io.github.chessoverlay.vision.BoardTracker
 import io.github.chessoverlay.vision.Img
 import io.github.chessoverlay.vision.Recognizer
 
-/** What the overlay shows. All coordinates are in captured-screen pixels. */
-data class OverlayState(
-    val status: String = "",
-    val corners: List<FloatArray>? = null,
-    val blackAtBottom: Boolean = false,
-    val board: Board? = null,
-    val whiteToMove: Boolean = true,
-    val lines: List<PvLine> = emptyList(),
-    val lastMove: MoveMark? = null,
-    /** The move just played (UCI), when known: its squares are highlighted. */
-    val playedMove: String? = null,
-)
-
-/** A grade for the move just played, drawn on its destination square. */
-data class MoveMark(val square: Int, val label: String, val color: Int)
-
 /**
  * Screen image -> board (BoardTracker) -> engine (EngineHost) -> OverlayState.
  * Called from one worker thread; engine updates arrive on the engine thread
@@ -48,6 +32,7 @@ class Analyst(
     @Volatile private var requestId = -1L
     @Volatile private var best: PvLine? = null          // best line of the current position
     private var pendingGrade: Pending? = null
+    private var lostReads = 0
 
     private data class Pending(val move: String, val before: Board, val bestBefore: PvLine, val whiteBefore: Boolean)
 
@@ -63,19 +48,21 @@ class Analyst(
             mark = grade(p, top, s.whiteToMove)
             pendingGrade = null
         }
-        val depth = top?.depth ?: 0
-        publish(s.copy(status = "Depth $depth${if (u.finished) "" else "…"}", lines = u.lines, lastMove = mark))
+        // Lines arriving end "Analysing…" and "restarting…"; other messages stay until the next position.
+        val passing = s.status == ANALYSING || s.status.startsWith("Engine stopped")
+        val status = if (passing && u.lines.isNotEmpty()) "" else s.status
+        publish(s.copy(status = status, searching = !u.finished, lines = u.lines, lastMove = mark))
     }
 
-    /** True if the board area changed since the last accepted position. */
-    fun boardChanged(img: Img): Boolean = tracker.changed(img)
+    /** The game on screen; read it only from the thread that calls look(). */
+    val board: BoardTracker get() = tracker
 
     /**
      * Read `img` and analyse if the position is new. `auto` = called by auto
-     * mode (quiet about failures). Returns true if a new analysis started.
+     * mode: failures are logged, not shown, and the last analysis stays.
      */
     @Synchronized
-    fun look(img: Img, auto: Boolean, forceLocate: Boolean = false): Boolean {
+    fun look(img: Img, auto: Boolean, forceLocate: Boolean = false): Look {
         // Known board position on screen: read the squares only; if that is
         // not clearly a board any more, locate it again.
         var rec = try {
@@ -83,30 +70,43 @@ class Analyst(
         } catch (e: Exception) {
             DebugLog.e(TAG, "recognition failed", e)
             if (!auto) publish(state.copy(status = "Recognition failed: ${e.message}"))
-            return false
+            return Look.FAILED
         }
         if (rec.confidence < minConfidence && tracker.corners != null && !forceLocate) {
             rec = try { recognizer.recognise(img) } catch (e: Exception) { rec }
         }
         if (rec.confidence < minConfidence) {
             DebugLog.i(TAG, "no clear board (${(rec.confidence * 100).toInt()}%)")
-            if (!auto) publish(OverlayState(status = "No clear board found (${(rec.confidence * 100).toInt()}% sure)"))
-            return false
+            // Twice in a row in auto mode: the board has gone (another
+            // screen); drop it, so no arrows hang over something else.
+            if (auto && tracker.corners != null && ++lostReads >= 2) {
+                lostReads = 0
+                tracker.reset()
+                requestId = -1
+                engine.stop()
+                publish(OverlayState(status = "Board gone; looking for it…"))
+            }
+            if (!auto) publish(state.copy(status = "No clear board found (${(rec.confidence * 100).toInt()}% sure)"))
+            return Look.NO_BOARD
         }
+        lostReads = 0
         return when (val r = tracker.accept(img, rec, sideOverride)) {
             is BoardTracker.Result.Same -> {
                 if (!auto && state.board == null) start(tracker.board!!, tracker.whiteToMove, null, null, true)
-                false
+                else if (!auto && state.status.isNotEmpty() && state.status != ANALYSING) publish(state.copy(status = ""))
+                Look.SAME
             }
             is BoardTracker.Result.Invalid -> {
+                // Almost always a misread (a piece caught mid-animation, a
+                // dragged piece): in auto mode keep the last analysis and
+                // let the next check try again.
                 DebugLog.i(TAG, "not analysable: ${r.reason} (${rec.placement})")
-                publish(OverlayState(status = "Not a legal position: ${r.reason}", corners = rec.corners,
-                    blackAtBottom = rec.blackAtBottom))
-                false
+                if (!auto) publish(state.copy(status = "Board misread (${r.reason}); try ▶ again"))
+                Look.INVALID
             }
             is BoardTracker.Result.Position -> {
                 start(r.board, r.whiteToMove, r.move, r.previous, r.previousWhiteToMove)
-                true
+                Look.NEW
             }
         }
     }
@@ -127,7 +127,8 @@ class Analyst(
         val fen = board.fen(white)
         DebugLog.i(TAG, "analyse $fen" + (move?.let { " after $it" } ?: ""))
         publish(OverlayState(
-            status = "Analysing…",
+            status = ANALYSING,
+            searching = true,
             corners = tracker.corners,
             blackAtBottom = tracker.blackAtBottom,
             board = board,
@@ -154,6 +155,7 @@ class Analyst(
 
     companion object {
         private const val TAG = "Analyst"
+        const val ANALYSING = "Analysing…"
 
         /** Grade by the win chance the mover lost (Lichess thresholds). */
         fun grade(before: PvLine, whiteBefore: Boolean, after: PvLine, whiteAfter: Boolean,
@@ -172,7 +174,7 @@ class Analyst(
             }
         }
 
-        /** Win expectation for White from a pawn score (logistic, as in Lichess). */
-        fun expected(pawns: Double): Double = 1.0 / (1.0 + Math.exp(-0.368208 * pawns))
+        /** Win expectation for White from a pawn score (see [winChance]). */
+        fun expected(pawns: Double): Double = winChance(pawns)
     }
 }

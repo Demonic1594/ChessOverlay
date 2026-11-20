@@ -10,7 +10,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.graphics.Color
 import android.graphics.PixelFormat
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -21,34 +20,35 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import android.util.DisplayMetrics
-import android.util.TypedValue
 import android.view.Gravity
-import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.widget.LinearLayout
-import android.widget.TextView
 import io.github.chessoverlay.DebugLog
 import io.github.chessoverlay.MainActivity
 import io.github.chessoverlay.Prefs
 import io.github.chessoverlay.engine.EngineHost
 import io.github.chessoverlay.engine.EngineRegistry
+import io.github.chessoverlay.vision.BoardTracker
 import io.github.chessoverlay.vision.Img
 import io.github.chessoverlay.vision.ModelStore
 import io.github.chessoverlay.vision.Recognizer
 
 /**
  * The overlay: reads the screen, follows the board, runs the engine and
- * draws over whatever app is showing.
+ * draws over whatever app is showing. Two windows: the board layer
+ * (DrawView, touch-through, arrows only) and the floating card (CardView:
+ * buttons, evaluation, lines).
  *
- * Threads: main (views), "overlay-worker" (frames, recognition, auto mode),
+ * Threads: main (views), "overlay-worker" (screen polling, recognition),
  * the engine host's own thread. Every handler is guarded: an error becomes
  * a status message and a DebugLog line, not a crash.
  *
- * Auto mode is driven by the screen: a frame that we did not cause by
- * redrawing marks the screen dirty; once frames stop for SETTLE_MS (moves
- * and animations done) the board is checked on a clean capture (our layer
- * hidden for about one frame), and only if a square changed is it read again.
+ * Auto mode polls the board's change-detection points every POLL_MS with
+ * the overlay showing (points under our own drawing are skipped, see
+ * BoardTracker.Cover). Only when at least two squares differ from the last
+ * read and the picture has stopped moving is the board read again, on a
+ * clean capture: the board layer is hidden for one frame, once per move.
+ * Misreads are retried with a growing pause and never replace the analysis.
  */
 class OverlayService : Service() {
     private lateinit var prefs: Prefs
@@ -60,28 +60,33 @@ class OverlayService : Service() {
     private var projection: MediaProjection? = null
     private var screen: ScreenSource? = null
     private var draw: DrawView? = null
-    private var bar: LinearLayout? = null
+    private var card: CardView? = null
+    private var cardLp: WindowManager.LayoutParams? = null
     private var engine: EngineHost? = null
     private var recognizer: Recognizer? = null
     private var analyst: Analyst? = null
+    private var density = 1f
+    private var screenW = 0
+    private var screenH = 0
 
-    // Auto mode bookkeeping (worker thread, except where @Volatile).
     @Volatile private var auto = false
     @Volatile private var shown = true
-    @Volatile private var lastOwnDraw = 0L      // last time our layer changed on screen
-    private var dirtySince = 0L                 // first external frame since the last check
-    private var lastExternal = 0L               // newest external frame
-    private var maskedFrames = 0                // frames we could not attribute (during our redraws)
-    private var lastCheck = 0L
-    private var busy = false
+    /** The card's screen rectangle (x0, y0, x1, y1), for covers and clean captures. */
+    @Volatile private var cardRect: IntArray? = null
 
-    // Overlay redraws are throttled: engine updates arrive many times a second.
+    // Auto mode (worker thread only).
+    private var busy = false
+    private var lastRead = 0L
+    private var previous: IntArray? = null
+    private var retryAt = 0L
+    private var misses = 0
+
+    // Redraws are throttled: engine updates arrive many times a second.
     private var pendingState: OverlayState? = null
     private var lastPush = 0L
-
-    private lateinit var autoBtn: TextView
-    private lateinit var sideBtn: TextView
-    private lateinit var showBtn: TextView
+    /** Board box and card height the card was last placed for (main thread). */
+    private var placedFor: IntArray? = null
+    private var placedHeight = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -91,6 +96,7 @@ class OverlayService : Service() {
         installCrashLogger()
         prefs = Prefs(this)
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        density = resources.displayMetrics.density
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -163,9 +169,9 @@ class OverlayService : Service() {
         val m = DisplayMetrics()
         @Suppress("DEPRECATION")
         wm.defaultDisplay.getRealMetrics(m)
-        val s = ScreenSource(mp, m.widthPixels, m.heightPixels, m.densityDpi, work)
-        s.onFrame = { t -> onFrame(t) }
-        screen = s
+        screenW = m.widthPixels
+        screenH = m.heightPixels
+        screen = ScreenSource(mp, m.widthPixels, m.heightPixels, m.densityDpi, work)
         DebugLog.i(TAG, "capturing ${m.widthPixels}x${m.heightPixels}")
     }
 
@@ -194,11 +200,15 @@ class OverlayService : Service() {
         analyst = a
         host.start()
         DebugLog.i(TAG, "ready: ${info.title}, ${prefs.lines} lines, think ${prefs.thinkMs} ms")
-        postState(OverlayState(status = "Ready. Auto mode ${if (prefs.autoStart) "on" else "off (tap A)"}; ▶ reads the screen now"))
+        postState(OverlayState(status = if (prefs.autoStart) "Looking for a board…" else "Tap ▶ to read the screen, A for auto mode"))
         main.post { if (prefs.autoStart && !auto) toggleAuto() }
     }
 
-    // ---- state -> overlay, throttled ------------------------------------
+    private fun boardStyle() = BoardStyle(prefs.arrows, prefs.pathPlies, prefs.arrowLabels, density)
+
+    private fun cardStyle() = CardStyle(density, prefs.evalBar, prefs.linesPanel, prefs.lines, prefs.arrows)
+
+    // ---- state -> windows, throttled ------------------------------------
 
     private fun postState(s: OverlayState) {
         main.post {
@@ -214,65 +224,167 @@ class OverlayService : Service() {
         val s = pendingState ?: return@Runnable
         pendingState = null
         lastPush = SystemClock.uptimeMillis()
-        lastOwnDraw = lastPush
         draw?.state = s
+        card?.state = s
+        s.corners?.let { placeCard(it) }
+    }
+
+    // ---- the card ---------------------------------------------------------
+
+    private fun cardWidth() = minOf(screenW - (16 * density).toInt(), (400 * density).toInt())
+
+    /**
+     * Until the user moves the card, keep it just above the board, or below
+     * it when there is no room above (the top of the screen otherwise).
+     */
+    private fun placeCard(k: List<FloatArray>) {
+        val v = card ?: return
+        val lp = cardLp ?: return
+        if (prefs.cardY >= 0) return
+        val box = intArrayOf(k.minOf { it[0] }.toInt(), k.minOf { it[1] }.toInt(),
+            k.maxOf { it[0] }.toInt(), k.maxOf { it[1] }.toInt())
+        val h = if (v.height > 0) v.height else (130 * density).toInt()
+        val p = placedFor
+        if (p != null && p.indices.all { kotlin.math.abs(p[it] - box[it]) < 8 } && placedHeight == h) return
+        placedFor = box
+        placedHeight = h
+        val gap = (6 * density).toInt()
+        val minY = (24 * density).toInt()
+        lp.y = when {
+            box[1] - gap - h >= minY -> box[1] - gap - h
+            box[3] + gap + h <= screenH -> box[3] + gap
+            else -> minY
+        }
+        lp.x = ((box[0] + box[2]) / 2 - lp.width / 2).coerceIn(0, maxOf(0, screenW - lp.width))
+        runCatching { wm.updateViewLayout(v, lp) }
+        updateCardRect()
+    }
+
+    private fun updateCardRect() {
+        val v = card ?: return
+        if (v.width == 0) return
+        val loc = IntArray(2)
+        v.getLocationOnScreen(loc)
+        cardRect = intArrayOf(loc[0], loc[1], loc[0] + v.width, loc[1] + v.height)
+    }
+
+    private val cardListener = object : CardView.Listener {
+        private var startX = 0
+        private var startY = 0
+        private var moving = false
+
+        override fun onButton(b: CardButton) {
+            when (b) {
+                CardButton.READ -> work.post { if (!busy) guarded("read") { read(auto = false) } }
+                CardButton.AUTO -> toggleAuto()
+                CardButton.SIDE -> cycleSide()
+                CardButton.SHOW -> toggleShown()
+                CardButton.CLOSE -> stopSelf()
+            }
+        }
+
+        override fun onDrag(dx: Int, dy: Int, done: Boolean) {
+            val v = card ?: return
+            val lp = cardLp ?: return
+            if (!moving) { startX = lp.x; startY = lp.y; moving = true }
+            lp.x = (startX + dx).coerceIn(-lp.width / 2, screenW - lp.width / 2)
+            lp.y = (startY + dy).coerceIn(0, maxOf(0, screenH - v.height / 2))
+            runCatching { wm.updateViewLayout(v, lp) }
+            if (done) {
+                moving = false
+                prefs.cardX = lp.x
+                prefs.cardY = lp.y
+                main.post { updateCardRect() }
+            }
+        }
+
+        override fun onFold(collapsed: Boolean) { prefs.cardCollapsed = collapsed }
     }
 
     // ---- auto mode -------------------------------------------------------
-
-    /** Worker thread: a new frame arrived. */
-    private fun onFrame(t: Long) {
-        if (t - lastOwnDraw < OWN_FRAME_MS) { maskedFrames++; return }
-        if (dirtySince == 0L) dirtySince = t
-        lastExternal = t
-    }
 
     private val autoTick = object : Runnable {
         override fun run() {
             if (!auto) return
             guarded("auto") { autoStep() }
-            work.postDelayed(this, TICK_MS)
+            work.postDelayed(this, POLL_MS)
         }
     }
 
     private fun autoStep() {
-        if (busy || analyst == null) return
+        val a = analyst ?: return
+        if (busy) return
         val now = SystemClock.uptimeMillis()
-        val settled = dirtySince != 0L && now - lastExternal >= SETTLE_MS
-        // Our redraws may have hidden a change: check once things are quiet.
-        val maskedCheck = maskedFrames > 0 && now - lastOwnDraw > QUIET_MS && now - lastCheck > MASKED_CHECK_MS
-        val periodic = now - lastCheck > PERIODIC_MS
-        if (settled || maskedCheck || periodic) check(auto = true)
+        if (now < retryAt) return
+        val tracker = a.board
+        val pts = tracker.points()
+        if (pts == null) {
+            // No board yet: look for one now and then (our layer is empty, so nothing flickers).
+            if (now - lastRead >= FIND_MS) read(auto = true)
+            return
+        }
+        val px = screen?.pixels(pts.first, pts.second) ?: return
+        val cover = cover()
+        val vsRead = tracker.compare(px, cover)
+        val before = previous
+        previous = px
+        val still = before != null && BoardTracker.compare(before, px, pts.first, pts.second, cover).changed == 0
+        if (vsRead.changed >= MIN_CHANGED && still) {
+            DebugLog.i(TAG, "${vsRead.changed} squares changed")
+            read(auto = true)
+        } else if (vsRead.blind > 0 && now - lastRead >= BLIND_MS) {
+            // Some squares are hidden under our own drawing: look at them now and then.
+            read(auto = true)
+        }
     }
 
-    /** Read the screen without our layer on it, then look at the board. */
-    private fun check(auto: Boolean) {
+    /** What our windows cover on screen now (their pixels are not compared). */
+    private fun cover(): BoardTracker.Cover? {
+        val c = cardRect?.let { RectCover(it[0], it[1], it[2], it[3]) }
+        return ShapeCover.union(draw?.cover(), c)
+    }
+
+    /** Read the screen without our layers on the board, then look at it. */
+    private fun read(auto: Boolean) {
         val a = analyst ?: return
         busy = true
-        dirtySince = 0L
-        maskedFrames = 0
-        lastCheck = SystemClock.uptimeMillis()
-        cleanCapture { img ->
+        cleanCapture(hideCard = !auto) { img ->
             guarded("analyse") {
-                if (img == null) {
-                    if (!auto) a.status("No screen image yet")
-                } else if (!auto) {
-                    a.look(img, auto = false, forceLocate = true)
-                } else if (a.boardChanged(img)) {
-                    a.look(img, auto = true)
+                val r = when {
+                    img == null -> { if (!auto) a.status("No screen image yet"); Look.FAILED }
+                    else -> a.look(img, auto = auto, forceLocate = !auto)
+                }
+                val now = SystemClock.uptimeMillis()
+                lastRead = now
+                previous = null
+                if (r == Look.NEW || r == Look.SAME) {
+                    misses = 0; retryAt = 0L
+                } else if (auto) {
+                    // A misread (mid-move) or no board: try again soon, then less often.
+                    misses = minOf(misses + 1, 5)
+                    retryAt = now + (RETRY_MS shl (misses - 1))
                 }
             }
             busy = false
         }
     }
 
-    /** Hide our layer, wait for a frame without it, grab, show the layer. */
-    private fun cleanCapture(then: (Img?) -> Unit) {
-        val needHide = shown && draw?.state?.corners != null
-        if (!needHide) { then(screen?.grab()); return }
+    /**
+     * Hide what covers the board (the board layer; the card too if it lies
+     * over the board, or always with `hideCard`), wait for a frame without
+     * it, grab, show again.
+     */
+    private fun cleanCapture(hideCard: Boolean, then: (Img?) -> Unit) {
+        val region = analyst?.board?.region()
+        val hideDraw = shown && draw?.state?.corners != null
+        val c = cardRect
+        val overBoard = c != null && region != null &&
+            c[0] < region[2] && c[2] > region[0] && c[1] < region[3] && c[3] > region[1]
+        val hideCard = hideCard || overBoard
+        if (!hideDraw && !hideCard) { then(screen?.grab()); return }
         main.post {
-            lastOwnDraw = SystemClock.uptimeMillis()
-            draw?.visibility = View.INVISIBLE
+            if (hideDraw) draw?.visibility = View.INVISIBLE
+            if (hideCard) card?.visibility = View.INVISIBLE
             val hiddenAt = SystemClock.uptimeMillis()
             work.post(object : Runnable {
                 var waited = 0L
@@ -282,8 +394,8 @@ class OverlayService : Service() {
                     if (s.latestTime > hiddenAt + 16 || waited >= HIDE_WAIT_MS) {
                         val img = s.grab()
                         main.post {
-                            lastOwnDraw = SystemClock.uptimeMillis()
                             if (shown) draw?.visibility = View.VISIBLE
+                            card?.visibility = View.VISIBLE
                         }
                         then(img)
                     } else {
@@ -299,9 +411,8 @@ class OverlayService : Service() {
 
     private fun overlayType() = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
 
-    @SuppressLint("ClickableViewAccessibility")
     private fun showViews() {
-        val dv = DrawView(this, prefs)
+        val dv = DrawView(this) { boardStyle() }
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
             overlayType(),
@@ -317,43 +428,26 @@ class OverlayService : Service() {
         wm.addView(dv, lp)
         draw = dv
 
-        val dp = { v: Float -> TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics).toInt() }
-        fun button(label: String, onClick: () -> Unit) = TextView(this).apply {
-            text = label
-            setTextColor(Color.WHITE)
-            textSize = 16f
-            gravity = Gravity.CENTER
-            setPadding(dp(10f), dp(8f), dp(10f), dp(8f))
-            setOnClickListener { try { onClick() } catch (e: Exception) { DebugLog.e(TAG, "button $label", e) } }
+        val cv = CardView(this, { cardStyle() }, cardListener).apply { collapsed = prefs.cardCollapsed }
+        val w = cardWidth()
+        val clp = WindowManager.LayoutParams(
+            w, WindowManager.LayoutParams.WRAP_CONTENT, overlayType(),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = if (prefs.cardY >= 0) prefs.cardX.coerceIn(-w / 2, screenW - w / 2) else (screenW - w) / 2
+            y = if (prefs.cardY >= 0) prefs.cardY.coerceIn(0, maxOf(0, screenH - (60 * density).toInt()))
+                else (80 * density).toInt()
         }
-        val handle = button("⠿") {}
-        val bl = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setBackgroundColor(0xE0202020.toInt())
-            addView(handle)
-            addView(button("▶") { work.post { if (!busy) guarded("read") { check(auto = false) } } })
-            autoBtn = button("A") { toggleAuto() }.also { addView(it) }
-            sideBtn = button("⇅") { cycleSide() }.also { addView(it) }
-            showBtn = button("◐") { toggleShown() }.also { addView(it) }
-            addView(button("✕") { stopSelf() })
+        cv.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            updateCardRect()
+            draw?.state?.corners?.let { placeCard(it) }
         }
-        val blp = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
-            overlayType(), WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT,
-        ).apply { gravity = Gravity.TOP or Gravity.START; x = dp(12f); y = dp(80f) }
-        var sx = 0; var sy = 0; var tx = 0f; var ty = 0f
-        handle.setOnTouchListener { _, e ->
-            when (e.action) {
-                MotionEvent.ACTION_DOWN -> { sx = blp.x; sy = blp.y; tx = e.rawX; ty = e.rawY; true }
-                MotionEvent.ACTION_MOVE -> {
-                    blp.x = sx + (e.rawX - tx).toInt(); blp.y = sy + (e.rawY - ty).toInt()
-                    wm.updateViewLayout(bl, blp); true
-                }
-                else -> false
-            }
-        }
-        wm.addView(bl, blp)
-        bar = bl
+        wm.addView(cv, clp)
+        card = cv
+        cardLp = clp
         updateButtons()
     }
 
@@ -361,8 +455,9 @@ class OverlayService : Service() {
         auto = !auto
         work.removeCallbacks(autoTick)
         if (auto) {
-            work.post { lastCheck = 0L }  // check at once
-            work.post(autoTick)
+            work.post { lastRead = 0L; retryAt = 0L; misses = 0; previous = null }
+            work.post { if (!busy) guarded("read") { read(auto = true) } }  // look at once
+            work.postDelayed(autoTick, POLL_MS)
         }
         DebugLog.i(TAG, "auto mode ${if (auto) "on" else "off"}")
         updateButtons()
@@ -383,10 +478,7 @@ class OverlayService : Service() {
     }
 
     private fun updateButtons() {
-        if (!::autoBtn.isInitialized) return
-        autoBtn.setTextColor(if (auto) 0xFF5FD068.toInt() else Color.WHITE)
-        sideBtn.text = when (analyst?.sideOverride) { true -> "W"; false -> "B"; null -> "⇅" }
-        showBtn.alpha = if (shown) 1f else 0.5f
+        card?.controls = CardControls(auto = auto, side = analyst?.sideOverride, shown = shown)
     }
 
     override fun onDestroy() {
@@ -395,8 +487,8 @@ class OverlayService : Service() {
         work.removeCallbacksAndMessages(null)
         main.removeCallbacksAndMessages(null)
         draw?.let { runCatching { wm.removeView(it) } }
-        bar?.let { runCatching { wm.removeView(it) } }
-        draw = null; bar = null
+        card?.let { runCatching { wm.removeView(it) } }
+        draw = null; card = null
         val e = engine; val r = recognizer; val s = screen
         engine = null; recognizer = null; analyst = null; screen = null
         work.post {
@@ -417,13 +509,12 @@ class OverlayService : Service() {
         private const val CHANNEL = "overlay"
         private const val TAG = "Overlay"
 
-        private const val DRAW_INTERVAL_MS = 200L   // at most 5 overlay redraws a second
-        private const val OWN_FRAME_MS = 120L       // frames this soon after our redraw are ours
-        private const val TICK_MS = 150L
-        private const val SETTLE_MS = 350L          // the screen must be still this long
-        private const val QUIET_MS = 1200L          // ... and our layer this long, for a masked check
-        private const val MASKED_CHECK_MS = 2500L
-        private const val PERIODIC_MS = 15_000L
+        private const val DRAW_INTERVAL_MS = 200L   // at most 5 redraws a second
+        private const val POLL_MS = 250L            // board check, overlay showing
+        private const val MIN_CHANGED = 2           // a move changes at least two squares
+        private const val FIND_MS = 2000L           // no board yet: look this often
+        private const val BLIND_MS = 12_000L        // squares under our drawing: look this often
+        private const val RETRY_MS = 500L           // after a misread: 0.5, 1, 2, 4, 8 s
         private const val HIDE_WAIT_MS = 250L
 
         fun start(ctx: Context, resultCode: Int, data: Intent) {

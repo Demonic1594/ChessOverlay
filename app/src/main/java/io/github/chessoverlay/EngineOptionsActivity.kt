@@ -85,7 +85,9 @@ class EngineOptionsActivity : Activity() {
                                 val v = s.toString()
                                 if (o.type == "spin") {
                                     val n = v.toIntOrNull() ?: return
-                                    if ((o.min != null && n < o.min) || (o.max != null && n > o.max)) return
+                                    val lo = o.min
+                                    val hi = o.max
+                                    if ((lo != null && n < lo) || (hi != null && n > hi)) return
                                 }
                                 save(v)
                             }

@@ -16,6 +16,11 @@ import io.github.chessoverlay.engine.EngineHost
 import io.github.chessoverlay.engine.EngineRegistry
 import io.github.chessoverlay.engine.PvLine
 import io.github.chessoverlay.overlay.Analyst
+import io.github.chessoverlay.overlay.BoardStyle
+import io.github.chessoverlay.overlay.CardButton
+import io.github.chessoverlay.overlay.CardControls
+import io.github.chessoverlay.overlay.CardStyle
+import io.github.chessoverlay.overlay.CardView
 import io.github.chessoverlay.overlay.DrawView
 import io.github.chessoverlay.overlay.MoveMark
 import io.github.chessoverlay.overlay.OverlayState
@@ -107,7 +112,7 @@ class DeviceTest {
                     state = s
                     if (s.lines.isNotEmpty() && s.lines[0].depth >= 10) got.countDown()
                 }.apply { thinkMs = 3000 }
-                assertTrue(a.look(image("screen1"), auto = false, forceLocate = true))
+                assertEquals(io.github.chessoverlay.overlay.Look.NEW, a.look(image("screen1"), auto = false, forceLocate = true))
                 assertTrue("no engine lines; state $state", got.await(30, TimeUnit.SECONDS))
             }
             storage.openOutputFile("timing.txt").use { it.write("recognition $ms ms\n".toByteArray()) }
@@ -142,13 +147,29 @@ class DeviceTest {
                 c.drawText(p.toString(), 40 + f * sq + sq * 0.3f, 300 + r * sq + sq * 0.7f, paint)
             }
         }
-        val prefs = Prefs(ctx)
-        val v = DrawView(ctx, prefs)
+        val dp = ctx.resources.displayMetrics.density
+        val v = DrawView(ctx) { BoardStyle(arrows = 2, pathPlies = 3, dp = dp) }
         v.state = state
         v.measure(View.MeasureSpec.makeMeasureSpec(880, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(1800, View.MeasureSpec.EXACTLY))
         v.layout(0, 0, 880, 1800)
         v.draw(c)
+        // The floating card above the board, drawn by the real view.
+        val card = CardView(ctx, { CardStyle(dp = dp, lines = 3, arrows = 2) }, object : CardView.Listener {
+            override fun onButton(b: CardButton) {}
+            override fun onDrag(dx: Int, dy: Int, done: Boolean) {}
+            override fun onFold(collapsed: Boolean) {}
+        })
+        card.state = state
+        card.controls = CardControls(auto = true)
+        card.measure(View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        card.layout(0, 0, 800, card.measuredHeight)
+        assertTrue("card has no height", card.measuredHeight > 0)
+        c.save()
+        c.translate(40f, 300f - card.measuredHeight - 8f)
+        card.draw(c)
+        c.restore()
         storage.openOutputFile("overlay.png").use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 }

@@ -2,8 +2,8 @@
 
 An Android app that reads a chess board from your screen, in any app, runs a
 chess engine on it, and draws the result over the board: arrows for the best
-moves, the best line as a numbered path, an evaluation bar, the engine's
-lines, and a grade for the move just played.
+moves, the best line's next moves, a grade for the move just played, and a
+floating card with the evaluation and the engine's lines.
 
 Typical use: analyse your own games wherever they are (game archives in
 other apps, videos, puzzles, books, screenshots), and collect positions.
@@ -32,15 +32,26 @@ responsible for any penalty, ban or other consequence of misusing this app.
 - **Engine options**: every UCI option the engine declares can be edited,
   including `UCI_LimitStrength` / `UCI_Elo` and Smotherfish's
   `Analysis Elo` and `Smother*` options.
-- **Overlay**: arrows for the best 0-5 moves with their scores; the best
-  line as numbered moves, each side counted on its own (White's moves 1, 2,
-  3 … in white badges, Black's 1, 2, 3 … in dark badges); evaluation bar; a lines panel with rank, score,
-  depth and the moves; the last move highlighted and graded (best ★, good ✓,
-  inaccuracy ?!, mistake ?, blunder ??, Lichess's thresholds).
-- **Auto mode** (on by default) follows the screen: when something on the
-  board changes it reads the board again (only the squares, once the board
-  is found), works out the exact move played and so the side to move, and
-  analyses until the next change.
+- **On the board, only arrows**: the best move as one bold blue arrow, the
+  next best lines as thin ones in their own colours (knight moves bend like
+  an L); the best line's next moves as slim arrows in the colour of the side
+  that plays them, numbered in a small disc in a corner of the destination
+  square, each side counted on its own (White's 1, 2, 3 … in white discs,
+  Black's in dark ones); the last move graded in the opposite corner (best
+  ★, good ✓, inaccuracy ?!, mistake ?, blunder ??, Lichess's thresholds).
+- **Floating card** with everything else: the buttons, the score (White's
+  view) and an evaluation bar, the side to move and depth, and one row per
+  engine line in short algebraic notation (checks, mates, disambiguation)
+  whose colour chip matches its arrow. It sits next to the board on its own;
+  drag it anywhere, tap the lines to fold them.
+- **Auto mode** (on by default) follows the screen without flicker: four
+  times a second it compares 25 points per square with the last read, with
+  the overlay showing (points under its own drawing are skipped). Only when
+  at least two squares changed and the picture is still does it read the
+  board again (hiding the arrows for one frame, once per move), work out
+  the exact move played and so the side to move, and analyse until the next
+  change. A misread caught mid-move is retried and never replaces the
+  analysis.
 - **Stability**: the engine runs under a supervisor that restarts it if it
   stops (crash, or killed by Android), resends its options and resumes the
   analysis; a position that crashes the engine twice is skipped. Errors are
@@ -53,8 +64,9 @@ responsible for any penalty, ban or other consequence of misusing this app.
 2. Tap **Download** under Recognition models (once, about 170 MB).
 3. Pick an engine; **Options** edits its settings.
 4. Tap **Initialize**: allow drawing over other apps, then screen capture.
-5. Open the app with the board. The bar: ⠿ drag · ▶ analyse now · A auto
-   mode · ⇅ side to move (auto / White / Black) · ◐ show/hide · ✕ close.
+5. Open the app with the board. The card: ▶ analyse now · A auto mode ·
+   ⇅ side to move (auto / White / Black) · ◐ show/hide the arrows · ✕ close;
+   drag it by any part; tap the lines to fold them.
 
 ## Builds
 
@@ -69,15 +81,23 @@ to bundle it.
 
 ## Tests
 
+The code is split in two modules: `core` (plain Kotlin: chess rules, UCI
+parsing, game tracking and the overlay's layout as plain shapes) and `app`
+(Android: screen capture, recognizer, engine processes, views).
+
+`./gradlew :core:test` runs chess logic (legality, notation), game tracking
+and change detection (including that the overlay's own drawing is never
+taken for a move), the card's layout (nothing runs past it at any width),
+and renders previews of the overlay on a phone-sized board to
+`core/build/preview/*.png`.
+
 `./gradlew testDebugUnitTest` runs (on the build machine):
-- chess logic (FEN completion, legality checks, move text);
 - UCI parsing, and with `ENGINE=/path/to/engine` a real analysis;
 - the recognizer against chessimg2pos (Python) on the same images: Pillow's
   resize reproduced to within 1 level, and with `MODELS=/folder/with/onnx`
   the same positions, orientation and board corners (within 2 px);
-- game tracking (exact move between positions, side to move, change
-  detection) and the engine supervisor (a killed engine restarts and the
-  analysis finishes; a position that kills it is skipped).
+- the engine supervisor (a killed engine restarts and the analysis
+  finishes; a position that kills it is skipped).
 
 CI also runs `connectedDebugAndroidTest` on an x86_64 emulator with an x86_64
 build of Smotherfish: the main screen, the engine on Android, recognition and

@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "ChessOverlay"
-include(":app")
+include(":app", ":core")

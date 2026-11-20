@@ -94,27 +94,40 @@ class MainActivity : Activity() {
         row(col, "Time per position", choice(times.map { if (it == 0) "Until it changes" else "${it / 1000} s" },
             times.indexOf(prefs.thinkMs).coerceAtLeast(0)) { prefs.thinkMs = times[it] })
         row(col, "Start in auto mode", toggle(prefs.autoStart) { prefs.autoStart = it })
-        note(col, "Auto mode follows the screen: when the board changes it reads it again, works out the " +
-            "move played and the side to move, and analyses until the next change.")
+        note(col, "Auto mode follows the screen: when a move is made it reads the board again, works out " +
+            "the move played and the side to move, and analyses until the next change.")
         val confs = listOf(0.3f, 0.5f, 0.7f, 0.9f)
         row(col, "Minimum recognition certainty", choice(confs.map { "${(it * 100).toInt()}%" },
             confs.indexOf(prefs.minConfidence).coerceAtLeast(0)) { prefs.minConfidence = confs[it] })
 
-        heading(col, "Display")
+        heading(col, "On the board")
         row(col, "Arrows (best moves)", choice((0..5).map { "$it" }, prefs.arrows) { prefs.arrows = it })
-        row(col, "Best line as a numbered path (moves)", choice((0..10).map { "$it" }, prefs.pathPlies) { prefs.pathPlies = it })
-        row(col, "Scores on arrows", toggle(prefs.arrowLabels) { prefs.arrowLabels = it })
-        row(col, "Evaluation bar", toggle(prefs.evalBar) { prefs.evalBar = it })
-        row(col, "Lines panel", toggle(prefs.linesPanel) { prefs.linesPanel = it })
+        row(col, "Next moves of the best line", choice((0..10).map { "$it" }, prefs.pathPlies) { prefs.pathPlies = it })
+        row(col, "Scores on the arrows", toggle(prefs.arrowLabels) { prefs.arrowLabels = it })
         row(col, "Grade the last move (auto mode)", toggle(prefs.annotate) { prefs.annotate = it })
+        note(col, "The best move is the bold blue arrow; other lines are thinner, in their own colours. " +
+            "The best line's next moves are slim white or black arrows, numbered per side in the corner " +
+            "of the square they go to.")
+
+        heading(col, "Floating card")
+        row(col, "Evaluation bar", toggle(prefs.evalBar) { prefs.evalBar = it })
+        row(col, "Engine lines", toggle(prefs.linesPanel) { prefs.linesPanel = it })
+        col.addView(Button(this).apply {
+            text = "Put the card back next to the board"
+            setOnClickListener {
+                prefs.cardX = -1; prefs.cardY = -1
+                Toast.makeText(this@MainActivity, "Done (takes effect when the overlay starts)", Toast.LENGTH_SHORT).show()
+            }
+        })
 
         col.addView(Button(this).apply {
             text = "Initialize"
             textSize = 18f
             setOnClickListener { initialize() }
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(64f)).apply { topMargin = dp(24f) })
-        note(col, "The overlay bar: ⠿ drag · ▶ analyse now · A auto mode · ⇅ side to move (auto / W / B) · " +
-            "◐ show or hide · ✕ close.").apply { gravity = Gravity.CENTER }
+        note(col, "The card: ▶ analyse now · A auto mode · ⇅ side to move (auto / W / B) · " +
+            "◐ show or hide the arrows · ✕ close. Drag it by any part; tap the lines to fold them.")
+            .apply { gravity = Gravity.CENTER }
 
         heading(col, "Debug")
         note(col, "If something goes wrong, copy the log and send it: it records engine crashes " +

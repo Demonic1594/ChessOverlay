@@ -85,10 +85,14 @@ class Board private constructor(private val sq: CharArray) {
     /** Why this placement with this side to move cannot be given to an
      *  engine, or null if it can. */
     fun problem(whiteToMove: Boolean): String? {
-        if (count('K') != 1 || count('k') != 1) return "need exactly one king per side"
-        for (i in (0..7) + (56..63)) if (sq[i] == 'P' || sq[i] == 'p') return "pawn on a back rank"
-        if (count('P') > 8 || count('p') > 8) return "more than 8 pawns"
-        if (sq.count { it.isUpperCase() } > 16 || sq.count { it.isLowerCase() } > 16) return "more than 16 pieces"
+        // A real game can never break these (promotions only replace pawns),
+        // so a board that does was read wrongly.
+        if (count('K') != 1 || count('k') != 1) return "${count('K')} white and ${count('k')} black kings"
+        for (i in (0..7) + (56..63)) if (sq[i] == 'P' || sq[i] == 'p') return "a pawn on the first or last rank"
+        if (count('P') > 8 || count('p') > 8) return "more than 8 pawns of one colour"
+        val white = sq.count { it.isUpperCase() }
+        val black = sq.count { it.isLowerCase() }
+        if (white > 16 || black > 16) return "$white white and $black black pieces; a side has at most 16"
         if (inCheck(!whiteToMove)) return "the side not to move is in check"
         return null
     }
@@ -115,9 +119,10 @@ class Board private constructor(private val sq: CharArray) {
         sq[from] = '.'
     }
 
-    /** Short algebraic-style text for a UCI move in this position: piece
-     *  letter, x for captures, destination, =Q for promotions, O-O for
-     *  castling. Ambiguities (two knights) are not resolved. */
+    /** Short algebraic notation for a UCI move in this position: piece
+     *  letter (with the file or rank when two such pieces could go there),
+     *  x for captures, destination, =Q for promotions, O-O for castling, +
+     *  for check. Mate is not detected here (that needs every reply). */
     fun moveText(uci: String): String {
         if (uci.length < 4) return uci
         val from = squareOf(uci.substring(0, 2))
@@ -126,18 +131,59 @@ class Board private constructor(private val sq: CharArray) {
         val piece = sq[from]
         if (piece == '.') return uci
         val type = piece.uppercaseChar()
-        if (type == 'K' && kotlin.math.abs(to - from) == 2) return if (to > from) "O-O" else "O-O-O"
-        val capture = sq[to] != '.' || (type == 'P' && (to - from) % 8 != 0)
         val sb = StringBuilder()
-        if (type == 'P') {
-            if (capture) sb.append('a' + from % 8)
+        if (type == 'K' && kotlin.math.abs(to - from) == 2) {
+            sb.append(if (to > from) "O-O" else "O-O-O")
         } else {
-            sb.append(type)
+            val capture = sq[to] != '.' || (type == 'P' && (to - from) % 8 != 0)
+            if (type == 'P') {
+                if (capture) sb.append('a' + from % 8)
+            } else {
+                sb.append(type)
+                if (type != 'K') sb.append(disambiguation(from, to, piece))
+            }
+            if (capture) sb.append('x')
+            sb.append(uci.substring(2, 4))
+            if (uci.length > 4) sb.append('=').append(uci[4].uppercaseChar())
         }
-        if (capture) sb.append('x')
-        sb.append(uci.substring(2, 4))
-        if (uci.length > 4) sb.append('=').append(uci[4].uppercaseChar())
+        val after = copy()
+        after.play(uci)
+        if (after.inCheck(!piece.isUpperCase())) sb.append('+')
         return sb.toString()
+    }
+
+    /** "", a file, a rank or a square: what tells `from` apart from other
+     *  pieces like it that could also move to `to` (pinned ones cannot). */
+    private fun disambiguation(from: Int, to: Int, piece: Char): String {
+        val white = piece.isUpperCase()
+        val others = (0..63).filter { o ->
+            o != from && sq[o] == piece && reaches(o, to) &&
+                copy().also { it.play(squareName(o) + squareName(to)) }.inCheck(white).not()
+        }
+        if (others.isEmpty()) return ""
+        if (others.none { it % 8 == from % 8 }) return "${'a' + from % 8}"
+        if (others.none { it / 8 == from / 8 }) return "${'1' + from / 8}"
+        return squareName(from)
+    }
+
+    /** Whether the knight, bishop, rook or queen on `from` attacks `to`. */
+    private fun reaches(from: Int, to: Int): Boolean {
+        val df = to % 8 - from % 8
+        val dr = to / 8 - from / 8
+        val adf = kotlin.math.abs(df)
+        val adr = kotlin.math.abs(dr)
+        val line = when (sq[from].lowercaseChar()) {
+            'n' -> return (adf == 1 && adr == 2) || (adf == 2 && adr == 1)
+            'b' -> adf == adr
+            'r' -> df == 0 || dr == 0
+            'q' -> adf == adr || df == 0 || dr == 0
+            else -> return false
+        }
+        if (!line) return false
+        val step = Integer.signum(dr) * 8 + Integer.signum(df)
+        var s = from + step
+        while (s != to) { if (sq[s] != '.') return false; s += step }
+        return true
     }
 
     /** Text for a whole line, e.g. "1. e4 e5 2. Nf3" (or "1... e5 2. Nf3"). */
