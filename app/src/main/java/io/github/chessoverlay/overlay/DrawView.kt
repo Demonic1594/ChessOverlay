@@ -18,7 +18,9 @@ class DrawView(ctx: Context, private val style: () -> BoardStyle) : View(ctx) {
     private val renderer = ShapeRenderer()
     private val loc = IntArray(2)
     @Volatile private var shapes: List<Shape> = emptyList()
-    @Volatile private var covers: Pair<ShapeCover?, ShapeCover?> = null to null
+    @Volatile private var current: ShapeCover? = null
+    @Volatile private var previous: ShapeCover? = null
+    @Volatile private var replacedAt = 0L
     private var key: String? = null
 
     var state: OverlayState = OverlayState()
@@ -30,16 +32,20 @@ class DrawView(ctx: Context, private val style: () -> BoardStyle) : View(ctx) {
             key = k
             val next = BoardLayer.build(v, st, renderer)
             shapes = next
-            val margin = 3f * st.dp
-            covers = (if (next.isEmpty()) null else ShapeCover(next, margin)) to covers.first
+            previous = current
+            replacedAt = android.os.SystemClock.uptimeMillis()
+            current = if (next.isEmpty()) null else ShapeCover(next, 2f * st.dp)
             postInvalidate()
         }
 
-    /** Screen pixels drawn now or a moment ago (null = none). Any thread. */
+    /**
+     * Screen pixels drawn now, and for PREVIOUS_MS after a change also those
+     * of the drawing before (a captured frame may still show it). Any thread.
+     */
     fun cover(): BoardTracker.Cover? {
         if (visibility != VISIBLE) return null
-        val (a, b) = covers
-        return ShapeCover.union(a, b)
+        val old = previous.takeIf { android.os.SystemClock.uptimeMillis() - replacedAt < PREVIOUS_MS }
+        return ShapeCover.union(current, old)
     }
 
     override fun onDraw(c: Canvas) {
@@ -52,6 +58,8 @@ class DrawView(ctx: Context, private val style: () -> BoardStyle) : View(ctx) {
     }
 
     companion object {
+        private const val PREVIOUS_MS = 500L
+
         /** What the board drawing depends on: same signature, same picture. */
         fun signature(s: OverlayState, st: BoardStyle): String {
             val k = s.corners ?: return ""

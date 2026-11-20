@@ -33,6 +33,7 @@ class Analyst(
     @Volatile private var best: PvLine? = null          // best line of the current position
     private var pendingGrade: Pending? = null
     private var lostReads = 0
+    @Volatile private var startedAt = 0L
 
     private data class Pending(val move: String, val before: Board, val bestBefore: PvLine, val whiteBefore: Boolean)
 
@@ -41,6 +42,11 @@ class Analyst(
         if (u.id != requestId) return
         val s = state
         val top = u.lines.firstOrNull()
+        // The first, shallow iterations change their minds every few
+        // milliseconds: show lines from depth MIN_DEPTH (or after
+        // FIRST_LINES_MS, for engines whose depths grow slowly).
+        if (s.lines.isEmpty() && !u.finished && top != null && top.depth < MIN_DEPTH &&
+            System.currentTimeMillis() - startedAt < FIRST_LINES_MS) return
         if (top != null) best = top
         var mark = s.lastMove
         val p = pendingGrade
@@ -77,9 +83,9 @@ class Analyst(
         }
         if (rec.confidence < minConfidence) {
             DebugLog.i(TAG, "no clear board (${(rec.confidence * 100).toInt()}%)")
-            // Twice in a row in auto mode: the board has gone (another
+            // Three times in a row in auto mode: the board has gone (another
             // screen); drop it, so no arrows hang over something else.
-            if (auto && tracker.corners != null && ++lostReads >= 2) {
+            if (auto && tracker.corners != null && ++lostReads >= 3) {
                 lostReads = 0
                 tracker.reset()
                 requestId = -1
@@ -90,7 +96,7 @@ class Analyst(
             return Look.NO_BOARD
         }
         lostReads = 0
-        return when (val r = tracker.accept(img, rec, sideOverride)) {
+        return when (val r = tracker.accept(img, rec, sideOverride, strict = auto)) {
             is BoardTracker.Result.Same -> {
                 if (!auto && state.board == null) start(tracker.board!!, tracker.whiteToMove, null, null, true)
                 else if (!auto && state.status.isNotEmpty() && state.status != ANALYSING) publish(state.copy(status = ""))
@@ -124,6 +130,7 @@ class Analyst(
         pendingGrade = if (annotate && move != null && previous != null && bestBefore != null &&
             previousWhite != white) Pending(move, previous, bestBefore, previousWhite) else null
         best = null
+        startedAt = System.currentTimeMillis()
         val fen = board.fen(white)
         DebugLog.i(TAG, "analyse $fen" + (move?.let { " after $it" } ?: ""))
         publish(OverlayState(
@@ -155,7 +162,9 @@ class Analyst(
 
     companion object {
         private const val TAG = "Analyst"
-        const val ANALYSING = "Analysing…"
+        const val ANALYSING = OverlayState.ANALYSING
+        private const val MIN_DEPTH = 8
+        private const val FIRST_LINES_MS = 300L
 
         /** Grade by the win chance the mover lost (Lichess thresholds). */
         fun grade(before: PvLine, whiteBefore: Boolean, after: PvLine, whiteAfter: Boolean,

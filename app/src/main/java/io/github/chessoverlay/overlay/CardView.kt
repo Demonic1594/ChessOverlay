@@ -10,8 +10,8 @@ import kotlin.math.ceil
 
 /**
  * The floating card (see [CardLayer]): buttons, evaluation and lines in one
- * window. Drag it anywhere to move it; tap a button to use it; tap the rest
- * to fold the lines away or back.
+ * window. Drag it anywhere to move it; tap a button to use it; tap the
+ * evaluation or the lines to fold the lines away or back.
  */
 class CardView(
     ctx: Context,
@@ -29,8 +29,16 @@ class CardView(
     private var layout: CardLayout? = null
     private var builtFor = -1
 
+    /** The last state with lines, shown faded while a new position waits for its own. */
+    private var ghost: OverlayState? = null
+
     var state: OverlayState = OverlayState()
-        set(v) { field = v; refresh() }
+        set(v) {
+            if (v.lines.isNotEmpty()) ghost = v
+            else if (v.board == null || v.corners == null) ghost = null
+            field = v
+            refresh()
+        }
     var controls = CardControls()
         set(v) { field = v; refresh() }
     var collapsed = false
@@ -44,7 +52,7 @@ class CardView(
     }
 
     private fun build(w: Int): CardLayout =
-        CardLayer.build(state, w.toFloat(), style(), controls, renderer, collapsed).also { layout = it; builtFor = w }
+        CardLayer.build(state, w.toFloat(), style(), controls, renderer, collapsed, ghost).also { layout = it; builtFor = w }
 
     private fun current(w: Int) = layout?.takeIf { builtFor == w } ?: build(w)
 
@@ -72,8 +80,10 @@ class CardView(
                 if (dragging) {
                     listener.onDrag((e.rawX - downX).toInt(), (e.rawY - downY).toInt(), true)
                 } else {
-                    val b = current(width).buttonAt(e.x, e.y)
-                    if (b != null) listener.onButton(b) else { collapsed = !collapsed; listener.onFold(collapsed) }
+                    val l = current(width)
+                    val b = l.buttonAt(e.x, e.y)
+                    if (b != null) listener.onButton(b)
+                    else if (e.y >= l.foldTop) { collapsed = !collapsed; listener.onFold(collapsed) }
                 }
                 dragging = false
             }

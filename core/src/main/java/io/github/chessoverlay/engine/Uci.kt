@@ -116,3 +116,34 @@ data class PvLine(
         }
     }
 }
+
+/**
+ * Groups "info … pv" lines into whole iterations. An engine prints one line
+ * per MultiPV rank at the end of each depth; passing each line on as it
+ * comes mixes depths (rank 1 already at depth 21, ranks 2 and 3 still at
+ * 20), so arrows swap and repeat for a moment. This releases a set only when
+ * it is whole: all `expected` ranks are in, or the next iteration has begun
+ * (a position with fewer legal moves than ranks), or the search ended.
+ */
+class PvCollector(private val expected: Int) {
+    private val pending = sortedMapOf<Int, PvLine>()
+    private var complete: List<PvLine> = emptyList()
+
+    /** Adds a line; returns the new whole set when this line completes one. */
+    fun add(pv: PvLine): List<PvLine>? {
+        var out: List<PvLine>? = null
+        if (pv.multipv == 1 && pending.isNotEmpty()) out = release()
+        pending[pv.multipv] = pv
+        if (pending.size >= expected) out = release()
+        return out
+    }
+
+    /** The search ended: the last whole set (or the partial one, if none was whole). */
+    fun finish(): List<PvLine> = if (complete.isNotEmpty()) complete else pending.values.toList()
+
+    private fun release(): List<PvLine> {
+        complete = pending.values.toList()
+        pending.clear()
+        return complete
+    }
+}

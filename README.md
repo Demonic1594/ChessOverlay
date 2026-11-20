@@ -44,14 +44,20 @@ responsible for any penalty, ban or other consequence of misusing this app.
   engine line in short algebraic notation (checks, mates, disambiguation)
   whose colour chip matches its arrow. It sits next to the board on its own;
   drag it anywhere, tap the lines to fold them.
-- **Auto mode** (on by default) follows the screen without flicker: four
-  times a second it compares 25 points per square with the last read, with
-  the overlay showing (points under its own drawing are skipped). Only when
-  at least two squares changed and the picture is still does it read the
-  board again (hiding the arrows for one frame, once per move), work out
-  the exact move played and so the side to move, and analyse until the next
-  change. A misread caught mid-move is retried and never replaces the
-  analysis.
+- **Auto mode** (on by default) follows the screen without flicker: about
+  16 times a second it compares 49 points per square with the last read,
+  with the overlay showing (points under its own drawing are skipped). When
+  at least two squares changed and the board has been still for 120 ms it
+  reads the board (hiding the arrows for one frame, once per move); a
+  capture that no longer matches the still board (a piece started gliding)
+  is thrown away, so pieces are never read in flight. It works out the
+  exact move played, or both moves when the reply came first, and so the
+  side to move. A small change that no move explains must be read the same
+  way twice; misreads never replace the analysis.
+- **Steady display**: engine lines are shown as whole iterations (every
+  line at one depth), from depth 8; the same position's updates reach the
+  screen about twice a second; the card keeps its size from move to move,
+  showing the last lines faded until the new ones arrive.
 - **Stability**: the engine runs under a supervisor that restarts it if it
   stops (crash, or killed by Android), resends its options and resumes the
   analysis; a position that crashes the engine twice is skipped. Errors are

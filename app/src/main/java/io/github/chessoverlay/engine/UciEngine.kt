@@ -38,7 +38,7 @@ class UciEngine(
     @Volatile private var readyOk: CountDownLatch? = null
     @Volatile private var bestMove: CountDownLatch? = null
     @Volatile private var listener: ((List<PvLine>, Boolean) -> Unit)? = null
-    private val lines = sortedMapOf<Int, PvLine>()
+    @Volatile private var collector = PvCollector(1)
 
     /** Start the process and run the "uci" handshake. Throws on failure. */
     fun start(timeoutMs: Long = 10_000) {
@@ -92,13 +92,15 @@ class UciEngine(
 
     /**
      * Start searching `fen`. `onUpdate(lines, finished)` is called from the
-     * reader thread with the lines so far, sorted by multipv. `movetimeMs`
+     * reader thread with each whole iteration (every line at one depth, see
+     * PvCollector), sorted by multipv. `movetimeMs`
      * 0 = until stop(); `depth` > 0 limits the depth instead.
      */
     fun go(fen: String, multipv: Int, movetimeMs: Long, depth: Int = 0,
            onUpdate: (List<PvLine>, Boolean) -> Unit): Boolean {
-        synchronized(lines) { lines.clear() }
-        if (hasOption("MultiPV")) setOption("MultiPV", multipv.toString())
+        val multi = hasOption("MultiPV")
+        collector = PvCollector(if (multi) multipv else 1)
+        if (multi) setOption("MultiPV", multipv.toString())
         if (hasOption("UCI_AnalyseMode")) setOption("UCI_AnalyseMode", "true")
         if (!isReady()) return false
         bestMove = CountDownLatch(1)
@@ -163,15 +165,10 @@ class UciEngine(
                 line == "uciok" -> uciOk?.countDown()
                 line == "readyok" -> readyOk?.countDown()
                 line.startsWith("info ") -> PvLine.parse(line)?.let { pv ->
-                    val snapshot = synchronized(lines) {
-                        lines[pv.multipv] = pv
-                        lines.values.toList()
-                    }
-                    notify(snapshot, false)
+                    collector.add(pv)?.let { notify(it, false) }
                 }
                 line.startsWith("bestmove") -> {
-                    val snapshot = synchronized(lines) { lines.values.toList() }
-                    notify(snapshot, true)
+                    notify(collector.finish(), true)
                     bestMove?.countDown()
                 }
             }

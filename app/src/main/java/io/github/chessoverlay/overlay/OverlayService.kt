@@ -29,6 +29,7 @@ import io.github.chessoverlay.Prefs
 import io.github.chessoverlay.engine.EngineHost
 import io.github.chessoverlay.engine.EngineRegistry
 import io.github.chessoverlay.vision.BoardTracker
+import io.github.chessoverlay.vision.ChangeWatcher
 import io.github.chessoverlay.vision.Img
 import io.github.chessoverlay.vision.ModelStore
 import io.github.chessoverlay.vision.Recognizer
@@ -45,10 +46,15 @@ import io.github.chessoverlay.vision.Recognizer
  *
  * Auto mode polls the board's change-detection points every POLL_MS with
  * the overlay showing (points under our own drawing are skipped, see
- * BoardTracker.Cover). Only when at least two squares differ from the last
- * read and the picture has stopped moving is the board read again, on a
- * clean capture: the board layer is hidden for one frame, once per move.
- * Misreads are retried with a growing pause and never replace the analysis.
+ * BoardTracker.Cover). When at least two squares differ from the last read
+ * and the board has not moved for STILL_MS, it is read again on a clean
+ * capture (the board layer hidden for one frame, once per move). A capture
+ * that does not match the still board it was taken for (a piece started
+ * moving) is thrown away, so a piece in flight is never read. Misreads are
+ * retried with a growing pause and never replace the analysis.
+ *
+ * The windows get a new position at once; further engine results for the
+ * same position at most every SAME_POSITION_MS, so the lines stay readable.
  */
 class OverlayService : Service() {
     private lateinit var prefs: Prefs
@@ -77,13 +83,14 @@ class OverlayService : Service() {
     // Auto mode (worker thread only).
     private var busy = false
     private var lastRead = 0L
-    private var previous: IntArray? = null
+    private val watcher = ChangeWatcher(STILL_MS, MIN_CHANGED, BLIND_MS)
     private var retryAt = 0L
     private var misses = 0
 
-    // Redraws are throttled: engine updates arrive many times a second.
+    // Redraws: a new position at once, the same position's updates throttled.
     private var pendingState: OverlayState? = null
     private var lastPush = 0L
+    private var pushedKey: String? = null
     /** Board box and card height the card was last placed for (main thread). */
     private var placedFor: IntArray? = null
     private var placedHeight = 0
@@ -213,17 +220,23 @@ class OverlayService : Service() {
     private fun postState(s: OverlayState) {
         main.post {
             pendingState = s
-            val now = SystemClock.uptimeMillis()
-            val wait = DRAW_INTERVAL_MS - (now - lastPush)
+            // A new position, its first lines, or a message: show at once.
+            val urgent = positionKey(s) != pushedKey || s.lines.isEmpty() || card?.state?.lines.isNullOrEmpty() ||
+                s.status != card?.state?.status
+            val wait = if (urgent) 0L else SAME_POSITION_MS - (SystemClock.uptimeMillis() - lastPush)
             main.removeCallbacks(pushState)
             if (wait <= 0) pushState.run() else main.postDelayed(pushState, wait)
         }
     }
 
+    private fun positionKey(s: OverlayState): String =
+        "${s.board?.placement()} ${s.whiteToMove} ${s.blackAtBottom} ${s.corners?.joinToString { "${it[0].toInt()},${it[1].toInt()}" }}"
+
     private val pushState = Runnable {
         val s = pendingState ?: return@Runnable
         pendingState = null
         lastPush = SystemClock.uptimeMillis()
+        pushedKey = positionKey(s)
         draw?.state = s
         card?.state = s
         s.corners?.let { placeCard(it) }
@@ -324,17 +337,9 @@ class OverlayService : Service() {
             return
         }
         val px = screen?.pixels(pts.first, pts.second) ?: return
-        val cover = cover()
-        val vsRead = tracker.compare(px, cover)
-        val before = previous
-        previous = px
-        val still = before != null && BoardTracker.compare(before, px, pts.first, pts.second, cover).changed == 0
-        if (vsRead.changed >= MIN_CHANGED && still) {
-            DebugLog.i(TAG, "${vsRead.changed} squares changed")
-            read(auto = true)
-        } else if (vsRead.blind > 0 && now - lastRead >= BLIND_MS) {
-            // Some squares are hidden under our own drawing: look at them now and then.
-            read(auto = true)
+        if (watcher.offer(now, px, tracker, cover(), lastRead) == ChangeWatcher.Decision.READ) {
+            DebugLog.i(TAG, "board changed")
+            read(auto = true, checkCapture = true)
         }
     }
 
@@ -344,25 +349,36 @@ class OverlayService : Service() {
         return ShapeCover.union(draw?.cover(), c)
     }
 
-    /** Read the screen without our layers on the board, then look at it. */
-    private fun read(auto: Boolean) {
+    /**
+     * Read the screen without our layers on the board, then look at it.
+     * `checkCapture`: throw the capture away if it does not show the board
+     * as the watcher last saw it still (a piece started moving).
+     */
+    private fun read(auto: Boolean, checkCapture: Boolean = false) {
         val a = analyst ?: return
         busy = true
         cleanCapture(hideCard = !auto) { img ->
             guarded("analyse") {
+                val moved = img != null && checkCapture && !watcher.captureMatches(img, a.board)
                 val r = when {
                     img == null -> { if (!auto) a.status("No screen image yet"); Look.FAILED }
+                    moved -> null
                     else -> a.look(img, auto = auto, forceLocate = !auto)
                 }
                 val now = SystemClock.uptimeMillis()
-                lastRead = now
-                previous = null
-                if (r == Look.NEW || r == Look.SAME) {
-                    misses = 0; retryAt = 0L
-                } else if (auto) {
-                    // A misread (mid-move) or no board: try again soon, then less often.
-                    misses = minOf(misses + 1, 5)
-                    retryAt = now + (RETRY_MS shl (misses - 1))
+                watcher.reset()
+                if (r == null) {
+                    // A piece started moving as we captured: look again once it stops.
+                    DebugLog.i(TAG, "board moved during the capture; reading again")
+                } else {
+                    lastRead = now
+                    if (r == Look.NEW || r == Look.SAME) {
+                        misses = 0; retryAt = 0L
+                    } else if (auto) {
+                        // A misread or no board: try again soon, then less often.
+                        misses = minOf(misses + 1, 5)
+                        retryAt = now + (RETRY_MS shl (misses - 1))
+                    }
                 }
             }
             busy = false
@@ -455,7 +471,7 @@ class OverlayService : Service() {
         auto = !auto
         work.removeCallbacks(autoTick)
         if (auto) {
-            work.post { lastRead = 0L; retryAt = 0L; misses = 0; previous = null }
+            work.post { lastRead = 0L; retryAt = 0L; misses = 0; watcher.reset() }
             work.post { if (!busy) guarded("read") { read(auto = true) } }  // look at once
             work.postDelayed(autoTick, POLL_MS)
         }
@@ -509,11 +525,12 @@ class OverlayService : Service() {
         private const val CHANNEL = "overlay"
         private const val TAG = "Overlay"
 
-        private const val DRAW_INTERVAL_MS = 200L   // at most 5 redraws a second
-        private const val POLL_MS = 250L            // board check, overlay showing
+        private const val SAME_POSITION_MS = 450L   // engine updates for one position: about 2 a second
+        private const val POLL_MS = 60L             // board check, overlay showing
+        private const val STILL_MS = 120L           // the board must not move for this long
         private const val MIN_CHANGED = 2           // a move changes at least two squares
         private const val FIND_MS = 2000L           // no board yet: look this often
-        private const val BLIND_MS = 12_000L        // squares under our drawing: look this often
+        private const val BLIND_MS = 20_000L        // squares under our drawing: look this often
         private const val RETRY_MS = 500L           // after a misread: 0.5, 1, 2, 4, 8 s
         private const val HIDE_WAIT_MS = 250L
 

@@ -166,6 +166,36 @@ class Board private constructor(private val sq: CharArray) {
         return squareName(from)
     }
 
+    /**
+     * Whether the piece on `from` could move to `to` by the way it moves
+     * (paths clear, no own piece on `to`). Checks, pins and castling rights
+     * are not considered: this only rules out moves no piece can make, so a
+     * misread is not taken for a move.
+     */
+    fun canMove(from: Int, to: Int): Boolean {
+        val p = sq[from]
+        if (p == '.' || from == to) return false
+        val t = sq[to]
+        if (t != '.' && t.isUpperCase() == p.isUpperCase()) return false
+        val df = to % 8 - from % 8
+        val dr = to / 8 - from / 8
+        return when (p.lowercaseChar()) {
+            'p' -> {
+                val dir = if (p.isUpperCase()) 1 else -1
+                val start = if (p.isUpperCase()) 1 else 6
+                when {
+                    df == 0 && dr == dir -> t == '.'
+                    df == 0 && dr == 2 * dir -> from / 8 == start && t == '.' && sq[from + 8 * dir] == '.'
+                    kotlin.math.abs(df) == 1 && dr == dir -> true  // a capture, or en passant onto an empty square
+                    else -> false
+                }
+            }
+            'k' -> (kotlin.math.abs(df) <= 1 && kotlin.math.abs(dr) <= 1) ||
+                (dr == 0 && kotlin.math.abs(df) == 2 && from % 8 == 4 && (from / 8 == 0 || from / 8 == 7))
+            else -> reaches(from, to)
+        }
+    }
+
     /** Whether the knight, bishop, rook or queen on `from` attacks `to`. */
     private fun reaches(from: Int, to: Int): Boolean {
         val df = to % 8 - from % 8
@@ -252,18 +282,20 @@ class Board private constructor(private val sq: CharArray) {
         /**
          * The single move that turns `before` into `after` (UCI, e.g. "e2e4",
          * "e1g1", "e7e8q"), or null if there is none. Tries every from/to
-         * pair among the changed squares, so castling, en passant and
-         * promotions are found too. Legality is not checked beyond that.
+         * pair among the changed squares that the piece could move between
+         * (see canMove), so castling, en passant and promotions are found
+         * too. `white` = only moves of that colour.
          */
-        fun findMove(before: Board, after: Board): String? {
+        fun findMove(before: Board, after: Board, white: Boolean? = null): String? {
             val changed = (0..63).filter { before[it] != after[it] }
             if (changed.isEmpty() || changed.size > 4) return null
             val target = after.placement()
             for (from in changed) {
                 val p = before[from]
                 if (p == '.' || after[from] != '.') continue  // the mover leaves its square empty
+                if (white != null && p.isUpperCase() != white) continue
                 for (to in changed) {
-                    if (to == from) continue
+                    if (to == from || !before.canMove(from, to)) continue
                     val base = squareName(from) + squareName(to)
                     val promo = p.lowercaseChar() == 'p' && (to / 8 == 7 || to / 8 == 0)
                     for (suffix in if (promo) listOf("q", "r", "b", "n") else listOf("")) {
@@ -271,6 +303,34 @@ class Board private constructor(private val sq: CharArray) {
                         val b = before.copy()
                         b.play(m)
                         if (b.placement() == target) return m
+                    }
+                }
+            }
+            return null
+        }
+
+        /**
+         * Two moves, the first by `firstWhite`'s side, that turn `before`
+         * into `after`: the reply came before the screen was read. The side
+         * to move is then the same as before them. Null if none.
+         */
+        fun findTwoMoves(before: Board, after: Board, firstWhite: Boolean): Pair<String, String>? {
+            val changed = (0..63).filter { before[it] != after[it] }
+            if (changed.size < 2 || changed.size > 8) return null
+            for (from in changed) {
+                val p = before[from]
+                if (p == '.' || p.isUpperCase() != firstWhite) continue
+                // The first move may land where the reply recaptures, which can
+                // look unchanged (a pawn taken and retaken by a pawn): any square.
+                for (to in 0..63) {
+                    if (!before.canMove(from, to)) continue
+                    val base = squareName(from) + squareName(to)
+                    val promo = p.lowercaseChar() == 'p' && (to / 8 == 7 || to / 8 == 0)
+                    for (suffix in if (promo) listOf("q", "r", "b", "n") else listOf("")) {
+                        val mid = before.copy()
+                        mid.play(base + suffix)
+                        val reply = findMove(mid, after, !firstWhite) ?: continue
+                        return base + suffix to reply
                     }
                 }
             }

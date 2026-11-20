@@ -7,7 +7,7 @@ import kotlin.math.max
 /**
  * Follows one game on screen.
  *
- * - Change detection: the colours at 25 points of every square, kept from
+ * - Change detection: the colours at 49 points of every square, kept from
  *   the last clean read, are compared with the screen. Points the overlay
  *   draws on are skipped (see Cover), so this works with the overlay
  *   showing; the recognizer (the expensive part, and the only step that
@@ -18,7 +18,8 @@ import kotlin.math.max
  * - Game tracking: consecutive positions are linked by the exact move
  *   between them (Board.findMove), which gives the side to move and the move
  *   just played; a jump of several moves or a new game falls back to the
- *   colour that left squares, then to the side at the bottom.
+ *   colour that left squares, then to the side at the bottom. Two moves at
+ *   once (a quick reply) are found too and keep the side to move.
  */
 class BoardTracker {
     var corners: List<FloatArray>? = null
@@ -98,11 +99,16 @@ class BoardTracker {
         ref = sample(img, px, py, 0, 0)
     }
 
+    /** A small change no move explains, read once: it must be read again the same way. */
+    private var suspect: String? = null
+
     /**
      * Take a recognition. `sideOverride` forces the side to move (null = work
-     * it out). Returns what changed.
+     * it out). `strict` (auto mode): a small change that neither one nor two
+     * moves explain is most likely a misread, so it counts only when the
+     * next read sees the same. Returns what changed.
      */
-    fun accept(img: Img, rec: Recognition, sideOverride: Boolean?): Result {
+    fun accept(img: Img, rec: Recognition, sideOverride: Boolean?, strict: Boolean = false): Result {
         val b = try {
             Board.fromPlacement(rec.placement)
         } catch (e: IllegalArgumentException) {
@@ -118,10 +124,23 @@ class BoardTracker {
             return Result.Same
         }
 
-        val move = if (prev != null && !flipped) Board.findMove(prev, b) else null
+        val linked = prev != null && !flipped
+        val move = if (linked) Board.findMove(prev!!, b) else null
+        // Both sides moved before the screen was read (a quick reply): the
+        // same side is to move again.
+        val two = if (linked && move == null) Board.findTwoMoves(prev!!, b, prevWhite) else null
+        if (linked && move == null && two == null && strict && sideOverride == null) {
+            val diff = (0..63).count { prev!![it] != b[it] }
+            if (diff <= SMALL_CHANGE && suspect != b.placement()) {
+                suspect = b.placement()
+                return Result.Invalid("no move explains it; reading again")
+            }
+        }
+        suspect = null
         val prefer: Boolean = sideOverride ?: when {
             move != null -> !b[Board.squareOf(move.substring(2, 4))].isUpperCase()
-            prev != null && !flipped -> Board.mover(prev, b)?.let { !it } ?: !rec.blackAtBottom
+            two != null -> prevWhite
+            linked -> Board.mover(prev!!, b)?.let { !it } ?: !rec.blackAtBottom
             else -> !rec.blackAtBottom
         }
         // A position no game can reach is a misread (a piece caught mid-move):
@@ -142,8 +161,11 @@ class BoardTracker {
     data class Comparison(val changed: Int, val blind: Int)
 
     companion object {
-        /** Points per square side: 5 x 5 over the inner 70% of each square. */
-        private const val SAMPLES = 5
+        /** Changed squares up to which an unexplained change is suspected to be a misread. */
+        private const val SMALL_CHANGE = 4
+
+        /** Points per square side: 7 x 7 over the inner 70% of each square. */
+        private const val SAMPLES = 7
         const val PER = SAMPLES * SAMPLES
         /** Visible points a square needs for a verdict. */
         private const val MIN_POINTS = 5

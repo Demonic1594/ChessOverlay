@@ -17,7 +17,12 @@ data class OverlayState(
     val lastMove: MoveMark? = null,
     /** The move just played (UCI), when known: its squares are highlighted. */
     val playedMove: String? = null,
-)
+) {
+    companion object {
+        /** Status while a new position waits for its first lines. */
+        const val ANALYSING = "Analysing…"
+    }
+}
 
 /** A grade for the move just played, drawn on its destination square. */
 data class MoveMark(val square: Int, val label: String, val color: Int)
