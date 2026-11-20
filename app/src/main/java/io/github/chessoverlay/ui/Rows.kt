@@ -16,6 +16,9 @@ import io.github.chessoverlay.R
 
 fun Context.dp(v: Float): Int = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics).toInt()
 
+/** "SmotherWinTimePercent" may break between its words ("Smother·Win·Time·Percent"), not mid-word. */
+fun breakable(name: String): String = name.replace(Regex("(?<=[a-z0-9])(?=[A-Z])|_"), "$0\u200B")
+
 /**
  * The building blocks of the settings screens, so every setting looks and
  * behaves the same: a switch row, a row of choice chips, an action row, a
