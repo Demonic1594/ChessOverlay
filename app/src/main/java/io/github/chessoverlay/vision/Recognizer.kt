@@ -1,0 +1,235 @@
+package io.github.chessoverlay.vision
+
+import ai.onnxruntime.OnnxTensor
+import ai.onnxruntime.OrtEnvironment
+import ai.onnxruntime.OrtSession
+import java.io.File
+import java.nio.FloatBuffer
+import kotlin.math.exp
+import kotlin.math.hypot
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+
+/** A recognised board. Corners are TL, TR, BR, BL in image pixels, as drawn. */
+data class Recognition(
+    val placement: String,          // FEN placement from White's side
+    val blackAtBottom: Boolean,
+    val confidence: Float,          // probability of the least certain square
+    val orientationConfidence: Float,
+    val corners: List<FloatArray>,
+    val legalityChanges: Int,
+)
+
+/**
+ * Chess board recognition: a Kotlin port of chessimg2pos v2 (MIT, Mattia
+ * Dicio, github.com/mdicio/chessimg2pos), using its ONNX models:
+ * locator.onnx finds the board's corners (two passes: whole image, then a
+ * crop around the first guess); board.onnx classifies the 64 squares and the
+ * orientation; a legality step fixes impossible boards on uncertain squares.
+ */
+class Recognizer(boardModel: File, locatorModel: File, threads: Int = 2) : AutoCloseable {
+    private val env = OrtEnvironment.getEnvironment()
+    private val opts = OrtSession.SessionOptions().apply { setIntraOpNumThreads(threads) }
+    private val board = env.createSession(boardModel.absolutePath, opts)
+    private val locator = env.createSession(locatorModel.absolutePath, opts)
+
+    override fun close() {
+        board.close(); locator.close(); opts.close()
+    }
+
+    fun recognise(img: Img, legality: Boolean = true): Recognition {
+        val corners = locate(img)
+        val input = boardInput(img, corners)
+        val x = FloatArray(3 * BOARD_SIZE * BOARD_SIZE)
+        input.toTensor(x)
+        OnnxTensor.createTensor(env, FloatBuffer.wrap(x), longArrayOf(1, 3, BOARD_SIZE.toLong(), BOARD_SIZE.toLong())).use { t ->
+            board.run(mapOf("board" to t)).use { out ->
+                @Suppress("UNCHECKED_CAST")
+                val sq = (out[0].value as Array<Array<FloatArray>>)[0]
+                @Suppress("UNCHECKED_CAST")
+                val ori = (out[1].value as Array<FloatArray>)[0]
+                val probs = Array(64) { softmax(sq[it]) }
+                val oriP = softmax(ori)
+                val (idx, changed) = if (legality) Legality.fix(probs) else Pair(IntArray(64) { argmax(probs[it]) }, 0)
+                val drawn = Fen.fromIndices(idx)
+                val black = oriP[1] > 0.5f
+                var conf = 1f
+                for (i in 0 until 64) conf = min(conf, probs[i][idx[i]])
+                return Recognition(
+                    placement = if (black) Fen.flip(drawn) else drawn,
+                    blackAtBottom = black,
+                    confidence = conf,
+                    orientationConfidence = max(oriP[0], oriP[1]),
+                    corners = corners,
+                    legalityChanges = changed,
+                )
+            }
+        }
+    }
+
+    /** Board corners (TL, TR, BR, BL) in image pixels. */
+    fun locate(img: Img): List<FloatArray> {
+        val rough = locateOnce(img)
+        val (crop, ox, oy) = refineCrop(img, cornersToBox(rough))
+        return locateOnce(crop).map { floatArrayOf(it[0] + ox, it[1] + oy) }
+    }
+
+    private fun locateOnce(img: Img): List<FloatArray> {
+        val side = max(img.w, img.h)
+        val x = FloatArray(3 * LOC_SIZE * LOC_SIZE)
+        img.padSquare(side).resize(LOC_SIZE, LOC_SIZE).toTensor(x)
+        OnnxTensor.createTensor(env, FloatBuffer.wrap(x), longArrayOf(1, 3, LOC_SIZE.toLong(), LOC_SIZE.toLong())).use { t ->
+            locator.run(mapOf("image" to t)).use { out ->
+                @Suppress("UNCHECKED_CAST")
+                val v = (out[0].value as Array<FloatArray>)[0].map { it * side }
+                return if (v.size == 4) boxToCorners(v[0], v[1], v[2], v[3])
+                else listOf(floatArrayOf(v[0], v[1]), floatArrayOf(v[2], v[3]), floatArrayOf(v[4], v[5]), floatArrayOf(v[6], v[7]))
+            }
+        }
+    }
+
+    companion object {
+        const val BOARD_SIZE = 256
+        const val LOC_SIZE = 320
+
+        fun softmax(v: FloatArray): FloatArray {
+            val m = v.max()
+            val e = FloatArray(v.size) { exp((v[it] - m).toDouble()).toFloat() }
+            val s = e.sum()
+            for (i in e.indices) e[i] /= s
+            return e
+        }
+
+        fun argmax(v: FloatArray): Int = v.indices.maxBy { v[it] }
+
+        fun boxToCorners(x0: Float, y0: Float, x1: Float, y1: Float) =
+            listOf(floatArrayOf(x0, y0), floatArrayOf(x1, y0), floatArrayOf(x1, y1), floatArrayOf(x0, y1))
+
+        fun cornersToBox(c: List<FloatArray>) =
+            floatArrayOf(c.minOf { it[0] }, c.minOf { it[1] }, c.maxOf { it[0] }, c.maxOf { it[1] })
+
+        /** Region around a rough box for the locator's second pass. */
+        fun refineCrop(img: Img, box: FloatArray, margin: Float = 0.1f): Triple<Img, Int, Int> {
+            val bw = box[2] - box[0]; val bh = box[3] - box[1]
+            var x0 = max(0, (box[0] - margin * bw).toInt()); var y0 = max(0, (box[1] - margin * bh).toInt())
+            var x1 = min(img.w, (box[2] + margin * bw).toInt()); var y1 = min(img.h, (box[3] + margin * bh).toInt())
+            if (x1 - x0 < 32 || y1 - y0 < 32) { x0 = 0; y0 = 0; x1 = img.w; y1 = img.h }
+            return Triple(img.crop(x0, y0, x1, y1), x0, y0)
+        }
+
+        fun isAxisAligned(c: List<FloatArray>, tol: Float = 0.006f): Boolean {
+            val b = cornersToBox(c)
+            val side = max(max(b[2] - b[0], b[3] - b[1]), 1e-6f)
+            val r = boxToCorners(b[0], b[1], b[2], b[3])
+            for (i in 0 until 4) for (j in 0 until 2) if (kotlin.math.abs(c[i][j] - r[i][j]) / side > tol) return false
+            return true
+        }
+
+        /** Python's round(): halves go to the even neighbour. */
+        private fun pyRound(v: Float): Int = Math.rint(v.toDouble()).toInt()
+
+        /** The classifier input: crop + resize for screenshots, perspective warp for photos. */
+        fun boardInput(img: Img, corners: List<FloatArray>): Img {
+            if (isAxisAligned(corners)) {
+                val b = cornersToBox(corners)
+                return img.crop(pyRound(b[0]), pyRound(b[1]), pyRound(b[2]), pyRound(b[3])).resize(BOARD_SIZE, BOARD_SIZE)
+            }
+            return warp(img, corners)
+        }
+
+        private fun warp(src: Img, cornersIn: List<FloatArray>): Img {
+            var img = src
+            var corners = cornersIn.map { doubleArrayOf(it[0].toDouble(), it[1].toDouble()) }
+            val sides = (0 until 4).map {
+                val a = corners[it]; val b = corners[(it + 1) % 4]
+                hypot(a[0] - b[0], a[1] - b[1])
+            }
+            val f = sides.min() / (1.5 * BOARD_SIZE)
+            if (f > 1) {
+                img = img.resize(max(1, (img.w / f).roundToInt()), max(1, (img.h / f).roundToInt()))
+                corners = corners.map { doubleArrayOf(it[0] / f, it[1] / f) }
+            }
+            return img.perspective(BOARD_SIZE, perspectiveCoeffs(corners, BOARD_SIZE))
+        }
+
+        /** Coefficients mapping the output square to the quad (TL, TR, BR, BL). */
+        fun perspectiveCoeffs(src: List<DoubleArray>, size: Int): DoubleArray {
+            val dst = listOf(0.0 to 0.0, size.toDouble() to 0.0, size.toDouble() to size.toDouble(), 0.0 to size.toDouble())
+            val a = Array(8) { DoubleArray(9) }
+            for (i in 0 until 4) {
+                val (u, v) = dst[i]; val x = src[i][0]; val y = src[i][1]
+                a[2 * i] = doubleArrayOf(u, v, 1.0, 0.0, 0.0, 0.0, -u * x, -v * x, x)
+                a[2 * i + 1] = doubleArrayOf(0.0, 0.0, 0.0, u, v, 1.0, -u * y, -v * y, y)
+            }
+            // Gaussian elimination with partial pivoting on the 8x9 augmented matrix.
+            for (col in 0 until 8) {
+                val p = (col until 8).maxBy { kotlin.math.abs(a[it][col]) }
+                val t = a[col]; a[col] = a[p]; a[p] = t
+                for (r in 0 until 8) if (r != col) {
+                    val k = a[r][col] / a[col][col]
+                    for (c in col..8) a[r][c] -= k * a[col][c]
+                }
+            }
+            return DoubleArray(8) { a[it][8] / a[it][it] }
+        }
+    }
+}
+
+/** FEN placement helpers; class order of the models. */
+object Fen {
+    const val CLASSES = "1KQRBNPkqrbnp"  // index 0 = empty
+
+    fun fromIndices(idx: IntArray): String {
+        val sb = StringBuilder()
+        for (r in 0 until 8) {
+            var empty = 0
+            for (c in 0 until 8) {
+                val ch = CLASSES[idx[r * 8 + c]]
+                if (ch == '1') empty++ else { if (empty > 0) sb.append(empty); empty = 0; sb.append(ch) }
+            }
+            if (empty > 0) sb.append(empty)
+            if (r < 7) sb.append('/')
+        }
+        return sb.toString()
+    }
+
+    private fun expand(p: String) = p.replace(Regex("[2-8]")) { "1".repeat(it.value.toInt()) }
+
+    private fun compress(p: String) = p.replace(Regex("1{2,8}")) { it.value.length.toString() }
+
+    fun flip(p: String): String =
+        compress(expand(p).split('/').reversed().joinToString("/") { it.reversed() })
+}
+
+/** Board-level consistency step (port of chessimg2pos v2 legality.py). */
+object Legality {
+    private val K = Fen.CLASSES.indexOf('K'); private val k = Fen.CLASSES.indexOf('k')
+    private val P = Fen.CLASSES.indexOf('P'); private val p = Fen.CLASSES.indexOf('p')
+    private val WHITE = "KQRBNP".map { Fen.CLASSES.indexOf(it) }.toSet()
+    private val BLACK = "kqrbnp".map { Fen.CLASSES.indexOf(it) }.toSet()
+
+    private fun demote(probs: Array<FloatArray>, idx: IntArray, sq: Int, banned: Set<Int>, lock: Float): Boolean {
+        if (probs[sq][idx[sq]] >= lock) return false
+        val order = probs[sq].indices.sortedByDescending { probs[sq][it] }
+        for (c in order) if (c !in banned) { idx[sq] = c; return true }
+        return false
+    }
+
+    fun fix(probs: Array<FloatArray>, lock: Float = 0.97f): Pair<IntArray, Int> {
+        val idx = IntArray(64) { Recognizer.argmax(probs[it]) }
+        val orig = idx.copyOf()
+        for (sq in (0 until 8) + (56 until 64)) if (idx[sq] == P || idx[sq] == p) demote(probs, idx, sq, setOf(P, p), lock)
+        for (king in listOf(K, k)) {
+            val squares = (0 until 64).filter { idx[it] == king }.sortedByDescending { probs[it][king] }
+            if (squares.size > 1) for (s in squares.drop(1)) demote(probs, idx, s, setOf(king), lock)
+        }
+        for ((side, pawn) in listOf(WHITE to P, BLACK to p)) {
+            val pawns = (0 until 64).filter { idx[it] == pawn }.sortedBy { probs[it][pawn] }
+            if (pawns.size > 8) for (s in pawns.take(pawns.size - 8)) demote(probs, idx, s, setOf(pawn), lock)
+            val pieces = (0 until 64).filter { idx[it] in side }.sortedBy { probs[it][idx[it]] }
+            if (pieces.size > 16) for (s in pieces.take(pieces.size - 16)) demote(probs, idx, s, side, lock)
+        }
+        return idx to (0 until 64).count { idx[it] != orig[it] }
+    }
+}

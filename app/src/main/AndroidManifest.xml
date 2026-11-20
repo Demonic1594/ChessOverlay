@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Draw arrows over other apps; read the screen while the overlay runs. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- One-time download of the recognition models. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Find engine apps that offer engines to chess GUIs (Open Exchange). -->
+    <queries>
+        <intent>
+            <action android:name="intent.chess.provider.ENGINE" />
+        </intent>
+    </queries>
+
+    <application
+        android:label="ChessOverlay"
+        android:icon="@android:drawable/ic_menu_view"
+        android:theme="@android:style/Theme.Material"
+        android:extractNativeLibs="true"
+        android:allowBackup="false">
+
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".EngineOptionsActivity" android:label="Engine options" />
+
+        <service
+            android:name=".overlay.OverlayService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+    </application>
+</manifest>
