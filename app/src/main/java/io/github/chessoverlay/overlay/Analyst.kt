@@ -83,17 +83,25 @@ class Analyst(
      */
     @Synchronized
     fun look(img: Img, auto: Boolean, forceLocate: Boolean = false): Look {
-        // Known board position on screen: read the squares only; if that is
-        // not clearly a board any more, locate it again.
+        // Known board position on screen: read the squares only, unless most
+        // squares look different from the last read (a move changes a few):
+        // then the board itself moved, zoomed or turned, and is found again.
+        val known = tracker.corners
+        val changed = if (known != null) tracker.changedSquares(img) else 64
+        var located = forceLocate || known == null || changed >= RELOCATE_SQUARES
         var rec = try {
-            recognizer.recognise(img, knownCorners = if (forceLocate) null else tracker.corners)
+            recognizer.recognise(img, knownCorners = if (located) null else known)
         } catch (e: Exception) {
             DebugLog.e(TAG, "recognition failed", e)
             if (!auto) publish(state.copy(status = "Recognition failed: ${e.message}"))
             return Look.FAILED
         }
-        if (rec.confidence < minConfidence && tracker.corners != null && !forceLocate) {
+        DebugLog.i(TAG, "read ${if (located) "after locating" else "at known corners"} ($changed squares changed): " +
+            "${rec.placement} ${if (rec.blackAtBottom) "black" else "white"} at bottom, sure ${(rec.confidence * 100).toInt()}%, " +
+            "corners ${rec.corners.joinToString(" ") { "${it[0].toInt()},${it[1].toInt()}" }}")
+        if (rec.confidence < minConfidence && !located) {
             rec = try { recognizer.recognise(img) } catch (e: Exception) { rec }
+            located = true
         }
         if (rec.confidence < minConfidence) {
             DebugLog.i(TAG, "no clear board (${(rec.confidence * 100).toInt()}%)")
@@ -112,7 +120,19 @@ class Analyst(
             return Look.NO_BOARD
         }
         lostReads = 0
-        return when (val r = tracker.accept(img, rec, sideOverride, strict = auto)) {
+        var r = tracker.accept(img, rec, sideOverride, strict = auto)
+        if (r is BoardTracker.Result.Invalid && !located) {
+            // Impossible at the old corners: maybe the board is somewhere else
+            // now (a site's opening animation, a scroll). Look for it before
+            // calling this a misread.
+            val again = try { recognizer.recognise(img) } catch (e: Exception) { null }
+            if (again != null && again.confidence >= minConfidence) {
+                DebugLog.i(TAG, "found again at ${again.corners.joinToString(" ") { "${it[0].toInt()},${it[1].toInt()}" }}: ${again.placement}")
+                r = tracker.accept(img, again, sideOverride, strict = auto)
+                rec = again
+            }
+        }
+        return when (r) {
             is BoardTracker.Result.Same -> {
                 // Same position, but the board may have been turned round or moved a little.
                 synchronized(lock) {
@@ -201,6 +221,8 @@ class Analyst(
         private const val TAG = "Analyst"
         const val ANALYSING = OverlayState.ANALYSING
         private const val MIN_DEPTH = 8
+        /** Squares that differ from the last read beyond which the board itself moved (a move changes 2 to 8). */
+        private const val RELOCATE_SQUARES = 12
         private const val FIRST_LINES_MS = 300L
 
         /** Grade by the win chance the mover lost (Lichess thresholds). */

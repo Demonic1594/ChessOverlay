@@ -23,6 +23,7 @@ import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import io.github.chessoverlay.DebugCapture
 import io.github.chessoverlay.DebugLog
 import io.github.chessoverlay.MainActivity
 import io.github.chessoverlay.Prefs
@@ -335,8 +336,10 @@ class OverlayService : Service() {
         val tracker = a.board
         val pts = tracker.points()
         if (pts == null) {
-            // No board yet: look for one now and then (our layer is empty, so nothing flickers).
-            if (now - lastRead >= FIND_MS) read(auto = true)
+            // No board yet: look for one now and then (our layer is empty, so
+            // nothing flickers), once the screen is still: a board caught in
+            // a site's opening animation would be found in the wrong place.
+            if (now - lastRead >= FIND_MS && screenStill(now)) read(auto = true)
             return
         }
         val px = screen?.pixels(pts.first, pts.second) ?: return
@@ -344,6 +347,36 @@ class OverlayService : Service() {
             DebugLog.i(TAG, "board changed")
             read(auto = true, checkCapture = true)
         }
+    }
+
+    // A coarse grid over the whole screen, for "is anything moving?" before a board is known.
+    private var gridX: IntArray? = null
+    private var gridY: IntArray? = null
+    private var lastGrid: IntArray? = null
+    private var gridStillSince = 0L
+
+    private fun screenStill(now: Long): Boolean {
+        val s = screen ?: return false
+        if (gridX == null || gridX!!.size != GRID_W * GRID_H) {
+            gridX = IntArray(GRID_W * GRID_H) { (it % GRID_W) * s.width / GRID_W + s.width / (2 * GRID_W) }
+            gridY = IntArray(GRID_W * GRID_H) { (it / GRID_W) * s.height / GRID_H + s.height / (2 * GRID_H) }
+        }
+        val px = s.pixels(gridX!!, gridY!!) ?: return false
+        val before = lastGrid
+        lastGrid = px
+        var moving = before == null
+        if (before != null) {
+            var diff = 0
+            for (i in px.indices) {
+                val a = px[i]; val b = before[i]
+                val d = maxOf(kotlin.math.abs((a shr 16 and 0xff) - (b shr 16 and 0xff)),
+                    kotlin.math.abs((a shr 8 and 0xff) - (b shr 8 and 0xff)), kotlin.math.abs((a and 0xff) - (b and 0xff)))
+                if (d > 24) diff++
+            }
+            moving = diff > px.size / 100   // more than 1% of the grid: something is moving
+        }
+        if (moving) gridStillSince = now
+        return now - gridStillSince >= FIND_STILL_MS
     }
 
     /** What our windows cover on screen now (their pixels are not compared). */
@@ -378,6 +411,8 @@ class OverlayService : Service() {
                     if (r == Look.NEW || r == Look.SAME) {
                         misses = 0; retryAt = 0L
                     } else if (auto) {
+                        // Keep what the recognizer saw when it keeps failing, to share from the app.
+                        if (misses >= 1 && img != null) DebugCapture.save(this@OverlayService, img, "$r")
                         // A misread or no board: try again soon, then less often.
                         misses = minOf(misses + 1, 5)
                         retryAt = now + (RETRY_MS shl (misses - 1))
@@ -563,7 +598,10 @@ class OverlayService : Service() {
         private const val POLL_MS = 60L             // board check, overlay showing
         private const val STILL_MS = 120L           // the board must not move for this long
         private const val MIN_CHANGED = 2           // a move changes at least two squares
-        private const val FIND_MS = 2000L           // no board yet: look this often
+        private const val FIND_MS = 1000L           // no board yet: look this often...
+        private const val FIND_STILL_MS = 300L      // ...once the screen has been still this long
+        private const val GRID_W = 18
+        private const val GRID_H = 36
         private const val BLIND_MS = 20_000L        // squares under our drawing: look this often
         private const val RETRY_MS = 500L           // after a misread: 0.5, 1, 2, 4, 8 s
         private const val HIDE_WAIT_MS = 250L
