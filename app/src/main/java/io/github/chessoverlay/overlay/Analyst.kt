@@ -9,6 +9,7 @@ import io.github.chessoverlay.engine.PvLine
 import io.github.chessoverlay.vision.BoardTracker
 import io.github.chessoverlay.vision.Img
 import io.github.chessoverlay.vision.Recognizer
+import io.github.chessoverlay.vision.plausibleBoard
 
 /**
  * Screen image -> board (BoardTracker) -> engine (EngineHost) -> OverlayState.
@@ -103,6 +104,11 @@ class Analyst(
             rec = try { recognizer.recognise(img) } catch (e: Exception) { rec }
             located = true
         }
+        if (located && !plausibleBoard(rec.corners, img.w, img.h)) {
+            // Not square, or tiny: something else was taken for a board.
+            DebugLog.i(TAG, "located shape is no board")
+            rec = rec.copy(confidence = 0f)
+        }
         if (rec.confidence < minConfidence) {
             DebugLog.i(TAG, "no clear board (${(rec.confidence * 100).toInt()}%)")
             // Three times in a row in auto mode: the board has gone (another
@@ -126,7 +132,7 @@ class Analyst(
             // now (a site's opening animation, a scroll). Look for it before
             // calling this a misread.
             val again = try { recognizer.recognise(img) } catch (e: Exception) { null }
-            if (again != null && again.confidence >= minConfidence) {
+            if (again != null && again.confidence >= minConfidence && plausibleBoard(again.corners, img.w, img.h)) {
                 DebugLog.i(TAG, "found again at ${again.corners.joinToString(" ") { "${it[0].toInt()},${it[1].toInt()}" }}: ${again.placement}")
                 r = tracker.accept(img, again, sideOverride, strict = auto)
                 rec = again

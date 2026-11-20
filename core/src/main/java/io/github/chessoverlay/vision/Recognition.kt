@@ -15,3 +15,19 @@ data class Recognition(
     /** The model's probability that Black is at the bottom. */
     val blackBottomP: Float = if (blackAtBottom) orientationConfidence else 1f - orientationConfidence,
 )
+
+/**
+ * Whether located corners can be a chess board on a `w` x `h` screen: a
+ * near-square (sides within 12% of each other) at least 15% of the
+ * screen's shorter side. Anything else is a false find, not a board to read.
+ */
+fun plausibleBoard(k: List<FloatArray>, w: Int, h: Int): Boolean {
+    if (k.size != 4) return false
+    val sides = (0 until 4).map { i ->
+        val a = k[i]; val b = k[(i + 1) % 4]
+        kotlin.math.hypot((a[0] - b[0]).toDouble(), (a[1] - b[1]).toDouble())
+    }
+    val mean = sides.average()
+    if (mean < 0.15 * minOf(w, h)) return false
+    return sides.all { kotlin.math.abs(it - mean) <= 0.12 * mean }
+}

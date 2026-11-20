@@ -144,3 +144,15 @@ class DecodingTest {
         assertFalse("e5d6" in Board.fromPlacement("4k3/8/8/4P3/8/8/8/4K3").legalMoves(true))
     }
 }
+
+class PlausibleBoardTest {
+    private fun box(x0: Float, y0: Float, x1: Float, y1: Float) =
+        listOf(floatArrayOf(x0, y0), floatArrayOf(x1, y0), floatArrayOf(x1, y1), floatArrayOf(x0, y1))
+
+    @Test fun onlyNearSquaresOfSomeSize() {
+        assertTrue(io.github.chessoverlay.vision.plausibleBoard(box(0f, 854f, 1440f, 2294f), 1440, 3120))
+        assertTrue(io.github.chessoverlay.vision.plausibleBoard(box(100f, 100f, 400f, 410f), 1080, 2400))   // 3% off
+        assertFalse(io.github.chessoverlay.vision.plausibleBoard(box(0f, 0f, 1440f, 700f), 1440, 3120))    // a wide strip
+        assertFalse(io.github.chessoverlay.vision.plausibleBoard(box(10f, 10f, 90f, 90f), 1440, 3120))     // a tiny square
+    }
+}
