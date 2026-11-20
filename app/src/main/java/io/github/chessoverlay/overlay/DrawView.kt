@@ -87,28 +87,30 @@ class DrawView(ctx: Context, private val prefs: Prefs) : View(ctx) {
     }
 
     /**
-     * The best line as numbered moves: every ply gets its number (1 = the
-     * move to play now, on the main arrow), in a white badge for White's
-     * moves and a dark one for Black's, placed two thirds along its arrow.
+     * The best line as numbered moves. Each side is counted on its own:
+     * White's moves are 1, 2, 3 … in white badges and Black's moves 1, 2,
+     * 3 … in dark badges (so after 1. Bb5 a6 2. Ba4 Nf6 3. O-O the white
+     * badges read 1, 2, 3 and the dark ones 1, 2). The badge sits two thirds
+     * along its arrow.
      */
     private fun drawPath(c: Canvas, s: OverlayState, board: Board, k: List<FloatArray>, sq: Float, badges: Boolean) {
         val pv = s.lines.firstOrNull()?.pv ?: return
         val plies = min(prefs.pathPlies + 1, pv.size)
         if (prefs.pathPlies <= 0 || plies <= 0) return
-        var white = s.whiteToMove
+        val labels = pathLabels(s.whiteToMove, plies)
         for (i in 0 until plies) {
             val m = pv[i]
             if (m.length < 4) break
             val from = Board.squareOf(m.substring(0, 2)); val to = Board.squareOf(m.substring(2, 4))
             if (from < 0 || to < 0) break
+            val (white, number) = labels[i]
             val a = centre(from, s, k); val b = centre(to, s, k)
             if (!badges && i > 0) {
                 // A contrasting outline keeps light arrows visible on light squares.
                 arrow(c, a, b, if (white) 0xC0202020.toInt() else 0xC0F5F5F5.toInt(), sq * 0.12f)
                 arrow(c, a, b, if (white) 0xF0F5F5F5.toInt() else 0xF0202020.toInt(), sq * 0.07f)
             }
-            if (badges) badge(c, PointF(a.x + (b.x - a.x) * 0.62f, a.y + (b.y - a.y) * 0.62f), "${i + 1}", white, sq)
-            white = !white
+            if (badges) badge(c, PointF(a.x + (b.x - a.x) * 0.62f, a.y + (b.y - a.y) * 0.62f), "$number", white, sq)
         }
     }
 
@@ -302,6 +304,22 @@ class DrawView(ctx: Context, private val prefs: Prefs) : View(ctx) {
     }
 
     companion object {
+        /**
+         * For the first `plies` moves of a line starting with `whiteToMove`:
+         * (is White's move, that side's own move number), each side counted
+         * separately from 1.
+         */
+        fun pathLabels(whiteToMove: Boolean, plies: Int): List<Pair<Boolean, Int>> {
+            var white = whiteToMove
+            var w = 0
+            var b = 0
+            return List(plies) {
+                val label = if (white) true to ++w else false to ++b
+                white = !white
+                label
+            }
+        }
+
         /** Best line green, then blue, orange, purple, grey. */
         val ARROW_COLORS = intArrayOf(0xD02E9E44.toInt(), 0xC02F7FD0.toInt(), 0xB0E08A20.toInt(),
             0xA09A4FD0.toInt(), 0x90909090.toInt())

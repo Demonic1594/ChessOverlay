@@ -73,3 +73,12 @@ class BoardTest {
         assertEquals(true, Board.mover(c, d))
     }
 }
+
+class PathLabelTest {
+    @Test fun eachSideCountsItsOwnMoves() {
+        val w = io.github.chessoverlay.overlay.DrawView.pathLabels(whiteToMove = true, plies = 5)
+        assertEquals(listOf(true to 1, false to 1, true to 2, false to 2, true to 3), w)
+        val b = io.github.chessoverlay.overlay.DrawView.pathLabels(whiteToMove = false, plies = 4)
+        assertEquals(listOf(false to 1, true to 1, false to 2, true to 2), b)
+    }
+}

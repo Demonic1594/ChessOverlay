@@ -33,8 +33,8 @@ responsible for any penalty, ban or other consequence of misusing this app.
   including `UCI_LimitStrength` / `UCI_Elo` and Smotherfish's
   `Analysis Elo` and `Smother*` options.
 - **Overlay**: arrows for the best 0-5 moves with their scores; the best
-  line as numbered moves (1 = the move to play, white badges for White's
-  moves, dark for Black's); evaluation bar; a lines panel with rank, score,
+  line as numbered moves, each side counted on its own (White's moves 1, 2,
+  3 … in white badges, Black's 1, 2, 3 … in dark badges); evaluation bar; a lines panel with rank, score,
   depth and the moves; the last move highlighted and graded (best ★, good ✓,
   inaccuracy ?!, mistake ?, blunder ??, Lichess's thresholds).
 - **Auto mode** (on by default) follows the screen: when something on the
