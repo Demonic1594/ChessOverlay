@@ -22,4 +22,6 @@ tasks.test {
     // Previews are written here: core/build/preview/*.png
     systemProperty("preview.dir", layout.buildDirectory.dir("preview").get().asFile.absolutePath)
     systemProperty("java.awt.headless", "true")
+    // EngineHostTest runs only with ENGINE_BIN; show what the engine did.
+    if (System.getenv("ENGINE_BIN") != null) testLogging { showStandardStreams = true }
 }

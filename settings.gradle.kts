@@ -13,4 +13,6 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "ChessOverlay"
-include(":app", ":core")
+include(":core")
+// CORE_ONLY: just the plain-Kotlin module (e.g. on a CI machine without the Android SDK).
+if (System.getenv("CORE_ONLY") == null) include(":app")

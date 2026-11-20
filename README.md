@@ -83,8 +83,12 @@ responsible for any penalty, ban or other consequence of misusing this app.
   Results of an old position can never land on a new one.
 - **Stability**: the engine runs under a supervisor that restarts it if it
   stops (crash, or killed by Android), resends its options and resumes the
-  analysis; a position that crashes the engine twice is skipped. Errors are
-  shown in the overlay and written to a debug log (Settings → Copy debug log).
+  analysis; a position that crashes the engine twice is skipped. An engine
+  that runs but says nothing for 6 seconds after being asked to analyse (or
+  ends an analysis without a single line) is logged with everything it
+  printed, restarted, and if it stays silent run with one thread, then also
+  without the smothered-mate prover; the card says so. Errors are shown in
+  the overlay and written to a debug log (Help and debug → Copy the debug log).
 
 ## Using it
 
@@ -103,6 +107,8 @@ responsible for any penalty, ban or other consequence of misusing this app.
    in "On the board" shows the drawing with your settings at once.
 6. If a read goes wrong: Help and debug → Copy the debug log, and Share the
    last misread screen (the screen a read failed on, as the app saw it).
+   If no lines appear: Help and debug → Test the engine runs it with your
+   options for a few seconds and says what it did (and logs it).
 
 ## Builds
 
@@ -127,8 +133,12 @@ tracking and change detection (including that the overlay's own drawing is
 never taken for a move, and a simulation of gliding pieces: read soon after
 they stop, never in flight), orientation and game-aware decoding (misread
 squares, boards turned round, undo), steady lines, the card's layout
-(nothing runs past it at any width), and renders previews of the overlay on
-a phone-sized board to `core/build/preview/*.png`.
+(nothing runs past it at any width), the engine watchdog (a fake engine that
+only answers on one thread gets restarted until it does), and renders
+previews of the overlay on a phone-sized board to `core/build/preview/*.png`.
+With `ENGINE_BIN=/path/to/engine` (and optionally `ENGINE_THREADS`) it also
+runs the app's engine code (EngineHost, UciEngine) against a real engine on
+three positions, the way the overlay does.
 
 `./gradlew testDebugUnitTest` runs (on the build machine):
 - UCI parsing, and with `ENGINE=/path/to/engine` a real analysis;
@@ -139,7 +149,9 @@ a phone-sized board to `core/build/preview/*.png`.
 - the engine supervisor (a killed engine restarts and the analysis
   finishes; a position that kills it is skipped).
 
-CI also runs `connectedDebugAndroidTest` on an x86_64 emulator with an x86_64
+CI runs that engine test on a real arm64 machine too (`engine-arm64`: the
+engine from the APK, 4 threads as on a phone), and
+`connectedDebugAndroidTest` on an x86_64 emulator with an x86_64
 build of Smotherfish: the main screen, the engine on Android, recognition and
 the whole pipeline on a screenshot, and a rendering of the overlay
 (`device-test-output` artifact).

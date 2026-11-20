@@ -69,7 +69,7 @@ class Analyst(
             pendingGrade = null
         }
         // Lines arriving end "Analysing…" and "restarting…"; other messages stay until the next position.
-        val passing = s.status == ANALYSING || s.status.startsWith("Engine stopped")
+        val passing = s.status == ANALYSING || s.status.startsWith("Engine ")
         val status = if (passing && u.lines.isNotEmpty()) "" else s.status
         val shown = stabilizer.offer(u.lines, u.finished)
         publish(s.copy(status = status, searching = !u.finished, lines = shown, lastMove = mark))

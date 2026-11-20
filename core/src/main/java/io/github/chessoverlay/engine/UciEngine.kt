@@ -1,5 +1,6 @@
 package io.github.chessoverlay.engine
 
+import io.github.chessoverlay.DebugLog
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -39,6 +40,20 @@ class UciEngine(
     @Volatile private var bestMove: CountDownLatch? = null
     @Volatile private var listener: ((List<PvLine>, Boolean) -> Unit)? = null
     @Volatile private var collector = PvCollector(1)
+
+    // What the engine said since the last "go", for the watchdog and the log.
+    @Volatile var goAt = 0L
+        private set
+    /** Lines with a principal variation since the last "go". */
+    @Volatile var pvSinceGo = 0
+        private set
+    /** Search output (any "info" with a depth, nodes or pv) since the last "go". */
+    @Volatile var searchOutputSinceGo = 0
+        private set
+    @Volatile var bestMoveLine: String? = null
+        private set
+    private val sinceGo = ArrayDeque<String>()
+    @Volatile private var listenerFailed = false
 
     /** Start the process and run the "uci" handshake. Throws on failure. */
     fun start(timeoutMs: Long = 10_000) {
@@ -102,9 +117,18 @@ class UciEngine(
         collector = PvCollector(if (multi) multipv else 1)
         if (multi) setOption("MultiPV", multipv.toString())
         if (hasOption("UCI_AnalyseMode")) setOption("UCI_AnalyseMode", "true")
-        if (!isReady()) return false
+        if (!isReady()) {
+            DebugLog.w(TAG, "$name: no readyok within 5 s before go (dead=$dead)${tailText()}")
+            return false
+        }
         bestMove = CountDownLatch(1)
         listener = onUpdate
+        listenerFailed = false
+        synchronized(sinceGo) { sinceGo.clear() }
+        pvSinceGo = 0
+        searchOutputSinceGo = 0
+        bestMoveLine = null
+        goAt = System.currentTimeMillis()
         if (!send("position fen $fen")) return false
         return send(
             when {
@@ -113,6 +137,11 @@ class UciEngine(
                 else -> "go infinite"
             }
         )
+    }
+
+    /** What the engine printed since the last "go" (at most the first and last few lines). */
+    fun sinceGoText(): String = synchronized(sinceGo) {
+        if (sinceGo.isEmpty()) "nothing" else sinceGo.joinToString(" | ")
     }
 
     /** Stop the current search and wait for its bestmove. False on timeout. */
@@ -149,7 +178,25 @@ class UciEngine(
     }
 
     private fun notify(snapshot: List<PvLine>, finished: Boolean) {
-        try { listener?.invoke(snapshot, finished) } catch (_: Throwable) {}
+        try {
+            listener?.invoke(snapshot, finished)
+        } catch (t: Throwable) {
+            // Never let it escape the reader thread, but say so (once per search).
+            if (!listenerFailed) {
+                listenerFailed = true
+                DebugLog.e(TAG, "handling engine lines failed at ${t.stackTrace.firstOrNull()}", t)
+            }
+        }
+    }
+
+    private fun noteSinceGo(line: String) {
+        if (goAt == 0L) return
+        val t = System.currentTimeMillis() - goAt
+        synchronized(sinceGo) {
+            // Keep the first lines (how the search began) and the latest ones.
+            if (sinceGo.size >= SINCE_GO_LINES) sinceGo.removeAt(SINCE_GO_LINES / 2)
+            sinceGo.addLast("+${t}ms ${line.take(140)}")
+        }
     }
 
     private fun readLoop(p: Process) {
@@ -164,10 +211,22 @@ class UciEngine(
                 line.startsWith("option ") -> UciOption.parse(line)?.let { options.add(it) }
                 line == "uciok" -> uciOk?.countDown()
                 line == "readyok" -> readyOk?.countDown()
-                line.startsWith("info ") -> PvLine.parse(line)?.let { pv ->
-                    collector.add(pv)?.let { notify(it, false) }
+                goAt != 0L && !line.startsWith("info ") && !line.startsWith("bestmove") -> noteSinceGo(line)
+                line.startsWith("info ") -> {
+                    val searching = !line.startsWith("info string") &&
+                        (" depth " in line || " nodes " in line || " pv " in line)
+                    if (searching) searchOutputSinceGo++
+                    if (searching && searchOutputSinceGo <= 3 || !searching) noteSinceGo(line)
+                    PvLine.parse(line)?.let { pv ->
+                        if (pv.pv.isNotEmpty()) {
+                            pvSinceGo++
+                            collector.add(pv)?.let { notify(it, false) }
+                        }
+                    }
                 }
                 line.startsWith("bestmove") -> {
+                    noteSinceGo(line)
+                    bestMoveLine = line
                     notify(collector.finish(), true)
                     bestMove?.countDown()
                 }
@@ -180,5 +239,10 @@ class UciEngine(
         // Never let a listener's exception escape this thread: on Android an
         // uncaught exception here would take the whole app down.
         try { onExit(this, exitCode) } catch (_: Throwable) {}
+    }
+
+    companion object {
+        private const val TAG = "UciEngine"
+        private const val SINCE_GO_LINES = 16
     }
 }

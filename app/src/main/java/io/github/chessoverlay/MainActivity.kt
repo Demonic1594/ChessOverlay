@@ -17,6 +17,7 @@ import androidx.core.content.FileProvider
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.progressindicator.LinearProgressIndicator
+import io.github.chessoverlay.engine.EngineCheck
 import io.github.chessoverlay.engine.EngineInfo
 import io.github.chessoverlay.engine.EngineRegistry
 import io.github.chessoverlay.overlay.BoardStyle
@@ -131,6 +132,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun buildDebug(r: Rows) {
+        r.action(R.drawable.ic_play, "Test the engine", "Runs it on a position for a few seconds, with your options, and says what it did.") {
+            testEngine()
+        }
         r.action(R.drawable.ic_copy, "Copy the debug log", "What the overlay saw and did: reads, engine starts and errors.") {
             getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("ChessOverlay log", DebugLog.dump()))
             toast("Debug log copied")
@@ -141,6 +145,38 @@ class MainActivity : AppCompatActivity() {
         r.action(R.drawable.ic_delete, "Clear the log", null) {
             DebugLog.clear()
             toast("Log cleared")
+        }
+    }
+
+    private fun testEngine() {
+        val e = engines.firstOrNull { it.id == prefs.engineId } ?: engines.firstOrNull()
+        if (e == null) { toast("No engine found yet"); return }
+        val busy = MaterialAlertDialogBuilder(this)
+            .setTitle("Testing ${e.title}")
+            .setMessage("Starting it and analysing for a few seconds…")
+            .setCancelable(false)
+            .show()
+        thread(name = "engine-test") {
+            val report = try {
+                EngineCheck.run(e.file, registry.workDir, prefs.engineOptions(e.id))
+            } catch (ex: Exception) {
+                DebugLog.e("EngineCheck", "test failed", ex)
+                EngineCheck.Report(false, "The test failed: ${ex.message}")
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                busy.dismiss()
+                MaterialAlertDialogBuilder(this)
+                    .setTitle(if (report.ok) "The engine works" else "The engine gave no lines")
+                    .setMessage(report.text)
+                    .setPositiveButton("OK", null)
+                    .setNeutralButton("Copy the debug log") { _, _ ->
+                        getSystemService(ClipboardManager::class.java)
+                            .setPrimaryClip(ClipData.newPlainText("ChessOverlay log", DebugLog.dump()))
+                        toast("Debug log copied")
+                    }
+                    .show()
+            }
         }
     }
 
