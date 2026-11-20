@@ -37,8 +37,13 @@ responsible for any penalty, ban or other consequence of misusing this app.
   a board turned round, by hand or by a site that turns it after every
   move, is the same game; the start position has White to move whichever
   side is at the bottom; turning the phone finds the board again at the new
-  screen size. On a benchmark of 30 games with site arrows and highlights
-  over pieces: 930 of 930 positions right (904 without this).
+  screen size. A new board theme mid-game (every square changes colour,
+  no piece moves) is read once and the game goes on; a rematch with the
+  sides swapped starts a new game the right way round. On benchmarks of 30
+  games each: with site arrows and highlights over pieces 930 of 930
+  positions right (904 without this); with themes switched mid-game, games
+  in brown, blue, grey and purple, and rematches with sides swapped, 930 of
+  930.
 - **Engines**: Smotherfish built in (Stockfish-based); any arm64 UCI engine
   binary you add (Stockfish, Komodo, lc0 with a Maia network set as its
   `WeightsFile`, …); and engine apps that offer engines to chess GUIs (the

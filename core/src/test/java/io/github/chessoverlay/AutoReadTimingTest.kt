@@ -136,3 +136,63 @@ class AutoReadTimingTest {
         assertEquals("White to move again after both moves", true, r.whiteToMove)
     }
 }
+
+/** Colours that change: the board theme mid-game, and players swapping sides. */
+class ColourChangeTest {
+    private val sq = 40
+    private val corners = listOf(floatArrayOf(10f, 10f), floatArrayOf(330f, 10f), floatArrayOf(330f, 330f), floatArrayOf(10f, 330f))
+    private val start = Board.fromPlacement("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR")
+
+    private fun render(b: Board, light: Int, dark: Int, black: Boolean = false): Img {
+        val img = Img(8 * sq + 20, 8 * sq + 20)
+        for (row in 0 until 8) for (col in 0 until 8) for (y in 0 until sq) for (x in 0 until sq) {
+            val square = if (black) row * 8 + (7 - col) else (7 - row) * 8 + col
+            val p = b[square]
+            val inPiece = p != '.' && x in sq / 4 until 3 * sq / 4 && y in sq / 4 until 3 * sq / 4
+            img.px[(10 + row * sq + y) * img.w + 10 + col * sq + x] = when {
+                inPiece && p.isUpperCase() -> 0xFFFFFF
+                inPiece -> 0x101010 + ("pnbrqk".indexOf(p) * 0x0A0A0A)
+                (row + col) % 2 == 0 -> light
+                else -> dark
+            }
+        }
+        return img
+    }
+
+    private fun rec(b: Board, black: Boolean) = Recognition(b.placement(), black, 0.99f, 0.99f, corners, 0)
+
+    @Test fun aNewBoardThemeIsReadOnceAndTheGameGoesOn() {
+        val t = BoardTracker()
+        val w = ChangeWatcher()
+        val p = start.copy().also { it.play("e2e4"); it.play("e7e5") }
+        t.accept(render(start, 0xEED8B5, 0xB58863), rec(start, false), null, strict = true)
+        t.accept(render(p, 0xEED8B5, 0xB58863), rec(p, false), null, strict = true)
+        // The user picks a blue theme: every square changes colour, no piece moves.
+        val blue = render(p, 0xEAE9D2, 0x4B7399)
+        val (xs, ys) = t.points()!!
+        var reads = 0
+        for (now in 0L..600L step 60) if (w.offer(now, BoardTracker.sample(blue, xs, ys, 0, 0), t, null, 0) == ChangeWatcher.Decision.READ) {
+            reads++
+            assertEquals(BoardTracker.Result.Same, t.accept(blue, rec(p, false), null, strict = true))
+            w.reset()
+        }
+        assertEquals("one read for the new colours, then quiet", 1, reads)
+        assertTrue(t.whiteToMove)
+        // The game continues in the new colours.
+        val q = p.copy().also { it.play("g1f3") }
+        assertEquals("g1f3", (t.accept(render(q, 0xEAE9D2, 0x4B7399), rec(q, false), null, strict = true)
+            as BoardTracker.Result.Position).move)
+    }
+
+    @Test fun aRematchWithSidesSwapped() {
+        val t = BoardTracker()
+        val end = Board.fromPlacement("6k1/5ppp/8/8/8/8/5PPP/3R2K1")   // the last game ended
+        t.accept(render(end, 0xEED8B5, 0xB58863), rec(end, false), null, strict = true)
+        // New game: the user now plays Black, so Black is at the bottom; White still moves first.
+        val r = t.accept(render(start, 0xEED8B5, 0xB58863, black = true), rec(start, true), null, strict = true)
+        // A change this big is a new game, not a misread: accepted on the first read.
+        assertTrue(r is BoardTracker.Result.Position)
+        assertTrue(t.blackAtBottom)
+        assertTrue(t.whiteToMove)
+    }
+}
