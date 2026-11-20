@@ -155,11 +155,15 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
+                    android:baselineAligned="false"
                     android:orientation="horizontal">
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/engineChange"
                         style="@style/Widget.Material3.Button.TonalButton"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        app:iconPadding="6dp"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_marginEnd="8dp"
@@ -171,6 +175,9 @@
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/engineOptions"
                         style="@style/Widget.Material3.Button.TonalButton"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        app:iconPadding="6dp"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
