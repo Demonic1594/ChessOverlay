@@ -42,6 +42,7 @@ class DrawView(ctx: Context, private val prefs: Prefs) : View(ctx) {
             val sqSize = hypot(corners[1][0] - corners[0][0], corners[1][1] - corners[0][1]) / 8f
             val board = s.board
             if (board != null) {
+                s.playedMove?.let { drawPlayed(c, it, s, corners, sqSize) }
                 drawPath(c, s, board, corners, sqSize)
                 drawArrows(c, s, board, corners, sqSize)
                 s.lastMove?.let { drawMark(c, it, s, corners, sqSize) }
@@ -84,30 +85,56 @@ class DrawView(ctx: Context, private val prefs: Prefs) : View(ctx) {
         }
     }
 
+    /**
+     * The best line as numbered moves: every ply gets its number (1 = the
+     * move to play now, on the main arrow), in a white badge for White's
+     * moves and a dark one for Black's, placed two thirds along its arrow.
+     */
     private fun drawPath(c: Canvas, s: OverlayState, board: Board, k: List<FloatArray>, sq: Float) {
         val pv = s.lines.firstOrNull()?.pv ?: return
-        val plies = min(prefs.pathPlies, pv.size - 1)
-        if (plies <= 0) return
-        var white = !s.whiteToMove  // the reply to the first move
-        for (i in 1..plies) {
+        val plies = min(prefs.pathPlies + 1, pv.size)
+        if (prefs.pathPlies <= 0 || plies <= 0) return
+        var white = s.whiteToMove
+        for (i in 0 until plies) {
             val m = pv[i]
+            if (m.length < 4) break
             val from = Board.squareOf(m.substring(0, 2)); val to = Board.squareOf(m.substring(2, 4))
             if (from < 0 || to < 0) break
-            val color = if (white) 0xC0F5F5F5.toInt() else 0xC0303030.toInt()
             val a = centre(from, s, k); val b = centre(to, s, k)
-            arrow(c, a, b, color, sq * 0.09f)
-            // Move number in a small disc near the arrow head.
-            val p = PointF(a.x + (b.x - a.x) * 0.75f, a.y + (b.y - a.y) * 0.75f)
-            fill.color = color
-            c.drawCircle(p.x, p.y, sq * 0.17f, fill)
-            text.color = if (white) Color.BLACK else Color.WHITE
-            text.textSize = sq * 0.22f
-            text.textAlign = Paint.Align.CENTER
-            c.drawText("${i + 1}", p.x, p.y + text.textSize * 0.36f, text)
+            if (i > 0) {
+                val color = if (white) 0xB0F5F5F5.toInt() else 0xB0202020.toInt()
+                arrow(c, a, b, color, sq * 0.08f)
+            }
+            badge(c, PointF(a.x + (b.x - a.x) * 0.62f, a.y + (b.y - a.y) * 0.62f), "${i + 1}", white, sq)
             white = !white
         }
+    }
+
+    private fun badge(c: Canvas, p: PointF, label: String, white: Boolean, sq: Float) {
+        val r = sq * 0.16f
+        fill.color = if (white) 0xF0FFFFFF.toInt() else 0xF0202020.toInt()
+        c.drawCircle(p.x, p.y, r, fill)
+        stroke.color = if (white) 0xFF202020.toInt() else 0xFFFFFFFF.toInt()
+        stroke.strokeWidth = max(1.5f, sq * 0.02f)
+        c.drawCircle(p.x, p.y, r, stroke)
+        text.color = if (white) Color.BLACK else Color.WHITE
+        text.textSize = sq * 0.2f
+        text.textAlign = Paint.Align.CENTER
+        c.drawText(label, p.x, p.y + text.textSize * 0.36f, text)
         text.textAlign = Paint.Align.LEFT
         text.color = Color.WHITE
+    }
+
+    /** Light tint on the two squares of the move just played. */
+    private fun drawPlayed(c: Canvas, move: String, s: OverlayState, k: List<FloatArray>, sq: Float) {
+        if (move.length < 4) return
+        fill.color = 0x50FFD54F
+        for (name in listOf(move.substring(0, 2), move.substring(2, 4))) {
+            val sqi = Board.squareOf(name)
+            if (sqi < 0) continue
+            val p = centre(sqi, s, k)
+            c.drawRect(p.x - sq / 2, p.y - sq / 2, p.x + sq / 2, p.y + sq / 2, fill)
+        }
     }
 
     private fun arrow(c: Canvas, a: PointF, b: PointF, color: Int, width: Float) {
@@ -182,22 +209,59 @@ class DrawView(ctx: Context, private val prefs: Prefs) : View(ctx) {
         text.textAlign = Paint.Align.LEFT
     }
 
+    /**
+     * The engine lines under the board (above it if there is no room): rank,
+     * score and depth, then the moves, wrapped onto at most two rows. Move
+     * numbers are not shown: a screenshot does not tell which move of the
+     * game it is.
+     */
     private fun drawPanel(c: Canvas, s: OverlayState, k: List<FloatArray>, sq: Float) {
         val board = s.board
-        val rows = mutableListOf<String>()
-        if (board != null) {
-            for (line in s.lines.take(prefs.lines)) {
-                rows.add("${line.scoreText(s.whiteToMove)}  ${board.lineText(line.pv, s.whiteToMove)}")
-            }
-        }
-        rows.add(s.status + (if (board != null) "  ·  ${if (s.whiteToMove) "White" else "Black"} to move" else ""))
         val left = min(k[0][0], k[3][0]); val right = max(k[1][0], k[2][0])
         val bottom = max(k[2][1], k[3][1]); val top = min(k[0][1], k[1][1])
-        val size = max(26f, sq * 0.26f)
-        val boxH = rows.size * size * 1.35f + size * 0.6f
-        // Below the board if it fits on screen, else above it.
+        val w = right - left
+        val size = max(22f, sq * 0.22f)
+        text.textSize = size
+        val pad = size * 0.5f
+        val rows = mutableListOf<Pair<String, Int>>()  // text, colour
+        if (board != null) {
+            for ((i, line) in s.lines.take(prefs.lines).withIndex()) {
+                val head = "${i + 1}  ${line.scoreText(s.whiteToMove)}  d${line.depth}  "
+                val moves = movesText(board, line.pv, s.whiteToMove)
+                val wrapped = wrap(head + moves, w - 2 * pad, 2)
+                val color = ARROW_COLORS[i % ARROW_COLORS.size] or 0xFF000000.toInt()
+                for ((j, r) in wrapped.withIndex()) rows.add((if (j == 0) r else "      $r") to color)
+            }
+        }
+        val side = if (board != null) "  ·  ${if (s.whiteToMove) "White" else "Black"} to move" else ""
+        rows.add((s.status + side) to Color.WHITE)
+        val lineH = size * 1.3f
+        val boxH = rows.size * lineH + pad
         val y = if (bottom + 8f + boxH <= loc[1] + height) bottom + 8f else max(loc[1].toFloat(), top - 8f - boxH)
-        drawBox(c, rows, left, y, right - left, size)
+        fill.color = 0xD8202020.toInt()
+        c.drawRoundRect(RectF(left, y, right, y + boxH), size * 0.4f, size * 0.4f, fill)
+        for ((i, r) in rows.withIndex()) {
+            // A colour chip ties each line to its arrow.
+            if (r.second != Color.WHITE && !r.first.startsWith(" ")) {
+                fill.color = r.second
+                c.drawRect(left + 4f, y + pad / 2 + i * lineH + lineH * 0.15f, left + 4f + pad * 0.45f,
+                    y + pad / 2 + (i + 1) * lineH - lineH * 0.15f, fill)
+            }
+            text.color = Color.WHITE
+            c.drawText(ellipsize(r.first, w - 2 * pad), left + pad, y + pad / 2 + i * lineH + size, text)
+        }
+    }
+
+    /** "e4 e5 Nf3 Nc6": moves in order, Black's first move prefixed with "…". */
+    private fun movesText(board: Board, pv: List<String>, whiteToMove: Boolean): String {
+        val b = board.copy()
+        val sb = StringBuilder(if (whiteToMove) "" else "… ")
+        for (m in pv.take(12)) {
+            if (m.length < 4) break
+            sb.append(b.moveText(m)).append(' ')
+            b.play(m)
+        }
+        return sb.toString().trim()
     }
 
     private fun drawBox(c: Canvas, rows: List<String>, x: Float, y: Float, w: Float, size: Float) {
@@ -206,10 +270,25 @@ class DrawView(ctx: Context, private val prefs: Prefs) : View(ctx) {
         val h = rows.size * size * 1.35f + size * 0.6f
         fill.color = 0xD0202020.toInt()
         c.drawRoundRect(RectF(x, y, x + w, y + h), size * 0.4f, size * 0.4f, fill)
-        for ((i, r) in rows.withIndex()) {
-            val clipped = ellipsize(r, w - size)
-            c.drawText(clipped, x + size * 0.5f, y + size * 1.2f + i * size * 1.35f, text)
+        for ((i, r) in rows.withIndex()) c.drawText(ellipsize(r, w - size), x + size * 0.5f, y + size * 1.2f + i * size * 1.35f, text)
+    }
+
+    /** Greedy word wrap to at most `maxRows` rows of width `w`. */
+    private fun wrap(s: String, w: Float, maxRows: Int): List<String> {
+        val rows = mutableListOf<String>()
+        var row = StringBuilder()
+        for (word in s.split(' ')) {
+            val candidate = if (row.isEmpty()) word else "$row $word"
+            if (text.measureText(candidate) <= w || row.isEmpty()) {
+                row = StringBuilder(candidate)
+            } else {
+                rows.add(row.toString())
+                if (rows.size == maxRows) return rows
+                row = StringBuilder(word)
+            }
         }
+        if (row.isNotEmpty() && rows.size < maxRows) rows.add(row.toString())
+        return rows
     }
 
     private fun ellipsize(s: String, w: Float): String {

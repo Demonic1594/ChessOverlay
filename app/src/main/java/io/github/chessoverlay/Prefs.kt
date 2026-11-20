@@ -29,7 +29,7 @@ class Prefs(ctx: Context) {
 
     /** Analysis time per position in ms; 0 = until the position changes. */
     var thinkMs: Int
-        get() = p.getInt("think_ms", 3000)
+        get() = p.getInt("think_ms", 0)
         set(v) = p.edit().putInt("think_ms", v.coerceAtLeast(0)).apply()
 
     var evalBar: Boolean
@@ -48,6 +48,11 @@ class Prefs(ctx: Context) {
     var annotate: Boolean
         get() = p.getBoolean("annotate", true)
         set(v) = p.edit().putBoolean("annotate", v).apply()
+
+    /** Start in auto mode when the overlay opens. */
+    var autoStart: Boolean
+        get() = p.getBoolean("auto_start", true)
+        set(v) = p.edit().putBoolean("auto_start", v).apply()
 
     /** Seconds between screen reads in auto mode. */
     var autoSeconds: Float

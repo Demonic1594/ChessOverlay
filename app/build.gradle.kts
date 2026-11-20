@@ -17,7 +17,11 @@ android {
         targetSdk = 28
         versionCode = 1
         versionName = "0.1.0"
-        ndk { abiFilters += listOf("arm64-v8a") }
+        // Phones are arm64; emulator tests in CI add x86_64 (-PextraAbi=x86_64).
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+            (project.findProperty("extraAbi") as String?)?.let { abiFilters += it }
+        }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -35,6 +39,8 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { buildConfig = true }
+    // On-device tests reuse the unit tests' images.
+    sourceSets["androidTest"].assets.srcDirs("src/test/resources")
     packaging {
         // Engines ship as lib*.so so that Android installs them as
         // executable files in nativeLibraryDir; they must stay extracted.
@@ -54,6 +60,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
     testImplementation("org.json:json:20240303")
     // JVM unit tests run the recognizer on the desktop ONNX Runtime.
     testImplementation("com.microsoft.onnxruntime:onnxruntime:1.20.0")

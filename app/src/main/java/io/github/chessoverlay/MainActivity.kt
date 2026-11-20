@@ -38,6 +38,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        DebugLog.init(filesDir)
         prefs = Prefs(this)
         registry = EngineRegistry(this)
         models = ModelStore(filesDir)
@@ -92,9 +93,9 @@ class MainActivity : Activity() {
         val times = listOf(1000, 2000, 3000, 5000, 10000, 0)
         row(col, "Time per position", choice(times.map { if (it == 0) "Until it changes" else "${it / 1000} s" },
             times.indexOf(prefs.thinkMs).coerceAtLeast(0)) { prefs.thinkMs = times[it] })
-        val intervals = listOf(0.75f, 1f, 1.5f, 2f, 3f, 5f)
-        row(col, "Auto mode: read the screen every", choice(intervals.map { "$it s" },
-            intervals.indexOf(prefs.autoSeconds).coerceAtLeast(0)) { prefs.autoSeconds = intervals[it] })
+        row(col, "Start in auto mode", toggle(prefs.autoStart) { prefs.autoStart = it })
+        note(col, "Auto mode follows the screen: when the board changes it reads it again, works out the " +
+            "move played and the side to move, and analyses until the next change.")
         val confs = listOf(0.3f, 0.5f, 0.7f, 0.9f)
         row(col, "Minimum recognition certainty", choice(confs.map { "${(it * 100).toInt()}%" },
             confs.indexOf(prefs.minConfidence).coerceAtLeast(0)) { prefs.minConfidence = confs[it] })
@@ -114,6 +115,24 @@ class MainActivity : Activity() {
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(64f)).apply { topMargin = dp(24f) })
         note(col, "The overlay bar: ⠿ drag · ▶ analyse now · A auto mode · ⇅ side to move (auto / W / B) · " +
             "◐ show or hide · ✕ close.").apply { gravity = Gravity.CENTER }
+
+        heading(col, "Debug")
+        note(col, "If something goes wrong, copy the log and send it: it records engine crashes " +
+            "(with the position), recognition results and errors.")
+        val dbg = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        dbg.addView(Button(this).apply {
+            text = "Copy debug log"
+            setOnClickListener {
+                val cm = getSystemService(android.content.ClipboardManager::class.java)
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("ChessOverlay log", DebugLog.dump()))
+                Toast.makeText(this@MainActivity, "Debug log copied", Toast.LENGTH_SHORT).show()
+            }
+        })
+        dbg.addView(Button(this).apply {
+            text = "Clear"
+            setOnClickListener { DebugLog.clear(); Toast.makeText(this@MainActivity, "Cleared", Toast.LENGTH_SHORT).show() }
+        })
+        col.addView(dbg)
     }
 
     override fun onResume() {

@@ -38,8 +38,10 @@ class Recognizer(boardModel: File, locatorModel: File, threads: Int = 2) : AutoC
         board.close(); locator.close(); opts.close()
     }
 
-    fun recognise(img: Img, legality: Boolean = true): Recognition {
-        val corners = locate(img)
+    /** Find the board and read it. With `knownCorners` (the board has not
+     *  moved on screen) the locator is skipped: one model run instead of three. */
+    fun recognise(img: Img, legality: Boolean = true, knownCorners: List<FloatArray>? = null): Recognition {
+        val corners = knownCorners ?: locate(img)
         val input = boardInput(img, corners)
         val x = FloatArray(3 * BOARD_SIZE * BOARD_SIZE)
         input.toTensor(x)

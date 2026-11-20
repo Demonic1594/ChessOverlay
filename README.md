@@ -32,12 +32,19 @@ responsible for any penalty, ban or other consequence of misusing this app.
 - **Engine options**: every UCI option the engine declares can be edited,
   including `UCI_LimitStrength` / `UCI_Elo` and Smotherfish's
   `Analysis Elo` and `Smother*` options.
-- **Overlay**: arrows for the best 0-5 moves with their scores, the best
-  line as numbered moves, evaluation bar, lines panel (1-5 lines), and move
-  grades (best ★, good ✓, inaccuracy ?!, mistake ?, blunder ??) in auto mode,
-  with Lichess's thresholds.
-- **Auto mode**: re-reads the screen every 0.75-5 s and re-analyses when the
-  position changes; the side to move follows from which colour just moved.
+- **Overlay**: arrows for the best 0-5 moves with their scores; the best
+  line as numbered moves (1 = the move to play, white badges for White's
+  moves, dark for Black's); evaluation bar; a lines panel with rank, score,
+  depth and the moves; the last move highlighted and graded (best ★, good ✓,
+  inaccuracy ?!, mistake ?, blunder ??, Lichess's thresholds).
+- **Auto mode** (on by default) follows the screen: when something on the
+  board changes it reads the board again (only the squares, once the board
+  is found), works out the exact move played and so the side to move, and
+  analyses until the next change.
+- **Stability**: the engine runs under a supervisor that restarts it if it
+  stops (crash, or killed by Android), resends its options and resumes the
+  analysis; a position that crashes the engine twice is skipped. Errors are
+  shown in the overlay and written to a debug log (Settings → Copy debug log).
 
 ## Using it
 
@@ -62,12 +69,20 @@ to bundle it.
 
 ## Tests
 
-`./gradlew testDebugUnitTest` runs:
+`./gradlew testDebugUnitTest` runs (on the build machine):
 - chess logic (FEN completion, legality checks, move text);
 - UCI parsing, and with `ENGINE=/path/to/engine` a real analysis;
 - the recognizer against chessimg2pos (Python) on the same images: Pillow's
   resize reproduced to within 1 level, and with `MODELS=/folder/with/onnx`
-  the same positions, orientation and board corners (within 2 px).
+  the same positions, orientation and board corners (within 2 px);
+- game tracking (exact move between positions, side to move, change
+  detection) and the engine supervisor (a killed engine restarts and the
+  analysis finishes; a position that kills it is skipped).
+
+CI also runs `connectedDebugAndroidTest` on an x86_64 emulator with an x86_64
+build of Smotherfish: the main screen, the engine on Android, recognition and
+the whole pipeline on a screenshot, and a rendering of the overlay
+(`device-test-output` artifact).
 
 ## Notes
 

@@ -204,6 +204,36 @@ class Board private constructor(private val sq: CharArray) {
         }
 
         /**
+         * The single move that turns `before` into `after` (UCI, e.g. "e2e4",
+         * "e1g1", "e7e8q"), or null if there is none. Tries every from/to
+         * pair among the changed squares, so castling, en passant and
+         * promotions are found too. Legality is not checked beyond that.
+         */
+        fun findMove(before: Board, after: Board): String? {
+            val changed = (0..63).filter { before[it] != after[it] }
+            if (changed.isEmpty() || changed.size > 4) return null
+            val target = after.placement()
+            for (from in changed) {
+                val p = before[from]
+                if (p == '.' || after[from] != '.') continue  // the mover leaves its square empty
+                for (to in changed) {
+                    if (to == from) continue
+                    val base = squareName(from) + squareName(to)
+                    val promo = p.lowercaseChar() == 'p' && (to / 8 == 7 || to / 8 == 0)
+                    for (suffix in if (promo) listOf("q", "r", "b", "n") else listOf("")) {
+                        val m = base + suffix
+                        val b = before.copy()
+                        b.play(m)
+                        if (b.placement() == target) return m
+                    }
+                }
+            }
+            return null
+        }
+
+        fun squareName(sq: Int) = "${'a' + sq % 8}${'1' + sq / 8}"
+
+        /**
          * Which colour moved between two placements, if they differ by about
          * one move: the colour of the pieces that left their squares.
          */

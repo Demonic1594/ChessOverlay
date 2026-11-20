@@ -48,16 +48,17 @@ class UciTest {
         assertTrue(e.options.any { it.name == "MultiPV" })
         val done = CountDownLatch(1)
         var final: List<PvLine> = emptyList()
-        e.analyse("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", 3, 500) { lines, finished ->
+        e.go("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", 3, 500) { lines, finished ->
             if (finished) { final = lines; done.countDown() }
         }
         assertTrue(done.await(10, TimeUnit.SECONDS))
         assertEquals(3, final.size)
         assertEquals(listOf(1, 2, 3), final.map { it.multipv })
         assertTrue(final.all { it.pv.isNotEmpty() && it.depth > 5 })
-        // Restart a search while one runs: the first must stop cleanly.
+        // A new search after stopping the previous one.
         val second = CountDownLatch(1)
-        e.analyse("4k3/8/8/8/8/8/8/R3K3 w - - 0 1", 1, 0) { _, _ -> second.countDown() }
+        e.stop()
+        e.go("4k3/8/8/8/8/8/8/R3K3 w - - 0 1", 1, 0) { _, _ -> second.countDown() }
         assertTrue(second.await(5, TimeUnit.SECONDS))
         e.stop()
         e.quit()
