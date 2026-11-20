@@ -37,7 +37,7 @@ class EngineHost(
     private data class Request(val id: Long, val fen: String, val multipv: Int, val movetimeMs: Long)
 
     /** Start the engine now (otherwise the first analyse() starts it). */
-    fun start() = exec.execute { ensureEngine() }
+    fun start() = submit { ensureEngine() }
 
     /**
      * Analyse `fen`; returns the request id that updates will carry. Any
@@ -46,23 +46,33 @@ class EngineHost(
      */
     fun analyse(fen: String, multipv: Int, movetimeMs: Long): Long {
         val r = Request(ids.incrementAndGet(), fen, multipv, movetimeMs)
-        exec.execute { run(r) }
+        submit { run(r) }
         return r.id
     }
 
-    fun stop() = exec.execute {
+    fun stop() = submit {
         current = null
         engine?.stop()
     }
 
     override fun close() {
         closed = true
-        exec.execute {
+        submit {
             engine?.quit()
             engine = null
         }
         exec.shutdown()
         exec.awaitTermination(3, TimeUnit.SECONDS)
+    }
+
+    /** Run on the engine thread; after close() the task is dropped instead
+     *  of throwing (an exception there would crash the app from the engine's
+     *  reader thread when the engine exits during shutdown). */
+    private fun submit(task: () -> Unit) {
+        try {
+            exec.execute(task)
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+        }
     }
 
     private fun run(r: Request) {
@@ -94,7 +104,7 @@ class EngineHost(
         }
         restartTimes.addLast(now)
         return try {
-            val e = UciEngine(executable, workDir) { dead, code -> exec.execute { onDeath(dead, code) } }
+            val e = UciEngine(executable, workDir) { dead, code -> submit { onDeath(dead, code) } }
             e.start()
             engineName = e.name
             applyOptions(e)

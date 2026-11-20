@@ -146,6 +146,10 @@ class UciEngine(
         return if (t.isEmpty()) "" else "; last output: " + t.takeLast(5).joinToString(" | ")
     }
 
+    private fun notify(snapshot: List<PvLine>, finished: Boolean) {
+        try { listener?.invoke(snapshot, finished) } catch (_: Throwable) {}
+    }
+
     private fun readLoop(p: Process) {
         val r = BufferedReader(InputStreamReader(p.inputStream))
         while (true) {
@@ -163,11 +167,11 @@ class UciEngine(
                         lines[pv.multipv] = pv
                         lines.values.toList()
                     }
-                    listener?.invoke(snapshot, false)
+                    notify(snapshot, false)
                 }
                 line.startsWith("bestmove") -> {
                     val snapshot = synchronized(lines) { lines.values.toList() }
-                    listener?.invoke(snapshot, true)
+                    notify(snapshot, true)
                     bestMove?.countDown()
                 }
             }
@@ -176,6 +180,8 @@ class UciEngine(
         dead = true
         exitCode = try { p.waitFor(); p.exitValue() } catch (_: Exception) { null }
         uciOk?.countDown(); readyOk?.countDown(); bestMove?.countDown()
-        onExit(this, exitCode)
+        // Never let a listener's exception escape this thread: on Android an
+        // uncaught exception here would take the whole app down.
+        try { onExit(this, exitCode) } catch (_: Throwable) {}
     }
 }

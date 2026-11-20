@@ -41,7 +41,12 @@ class DeviceTest {
     private val out = File(ctx.getExternalFilesDir(null), "test-out").apply { mkdirs() }
 
     private fun image(name: String): Img {
-        val bytes = GZIPInputStream(ctx.assets.open("vision/$name.rgb.gz")).readBytes()
+        val names = ctx.assets.list("vision")?.toList() ?: emptyList()
+        val bytes = when {
+            "$name.rgb.gz" in names -> GZIPInputStream(ctx.assets.open("vision/$name.rgb.gz")).readBytes()
+            "$name.rgb" in names -> ctx.assets.open("vision/$name.rgb").readBytes()
+            else -> throw java.io.FileNotFoundException("vision/$name.rgb(.gz) not in assets: $names")
+        }
         val nl = bytes.indexOf('\n'.code.toByte())
         val (w, h) = String(bytes, 0, nl).split(' ').map { it.toInt() }
         val img = Img(w, h)

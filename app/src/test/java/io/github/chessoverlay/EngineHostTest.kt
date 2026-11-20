@@ -47,6 +47,32 @@ class EngineHostTest {
         DebugLog.dump().let { assertTrue("crash must be logged", "engine exited (code 3)" in it) }
     }
 
+    /**
+     * Closing the host makes the engine exit; that exit must not throw on the
+     * engine's reader thread (on Android an uncaught exception there crashed
+     * the whole app when the overlay closed).
+     */
+    @Test fun closingDoesNotThrowOnBackgroundThreads() {
+        val path = System.getenv("ENGINE")
+        assumeTrue("set ENGINE to run this test", path != null && File(path).canExecute())
+        val uncaught = CopyOnWriteArrayList<Throwable>()
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { _, e -> uncaught.add(e) }
+        try {
+            repeat(3) {
+                val done = CountDownLatch(1)
+                EngineHost(File(path!!), tmp, emptyMap(), onUpdate = { if (it.finished) done.countDown() }, onStatus = {}).use { host ->
+                    host.analyse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 1, 300)
+                    done.await(10, TimeUnit.SECONDS)
+                }
+            }
+            Thread.sleep(1500)  // let the engines' reader threads see the exits
+            assertTrue("uncaught: $uncaught", uncaught.isEmpty())
+        } finally {
+            Thread.setDefaultUncaughtExceptionHandler(previous)
+        }
+    }
+
     /** With a real engine (ENGINE env): kill it mid-analysis; it restarts and the analysis finishes. */
     @Test fun realEngineRestartsAfterKill() {
         val path = System.getenv("ENGINE")
