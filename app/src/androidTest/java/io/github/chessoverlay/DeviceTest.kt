@@ -8,6 +8,8 @@ import android.view.View
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.services.storage.TestStorage
 import io.github.chessoverlay.chess.Board
 import io.github.chessoverlay.engine.AnalysisUpdate
 import io.github.chessoverlay.engine.EngineHost
@@ -38,13 +40,15 @@ import java.util.zip.GZIPInputStream
 class DeviceTest {
     private val ctx: Context = ApplicationProvider.getApplicationContext()
     private val models = File("/data/local/tmp/models")
-    private val out = File(ctx.getExternalFilesDir(null), "test-out").apply { mkdirs() }
+    /** The test APK's own context: its assets hold the test images. */
+    private val testCtx: Context = InstrumentationRegistry.getInstrumentation().context
+    private val storage = TestStorage()
 
     private fun image(name: String): Img {
-        val names = ctx.assets.list("vision")?.toList() ?: emptyList()
+        val names = testCtx.assets.list("vision")?.toList() ?: emptyList()
         val bytes = when {
-            "$name.rgb.gz" in names -> GZIPInputStream(ctx.assets.open("vision/$name.rgb.gz")).readBytes()
-            "$name.rgb" in names -> ctx.assets.open("vision/$name.rgb").readBytes()
+            "$name.rgb.gz" in names -> GZIPInputStream(testCtx.assets.open("vision/$name.rgb.gz")).readBytes()
+            "$name.rgb" in names -> testCtx.assets.open("vision/$name.rgb").readBytes()
             else -> throw java.io.FileNotFoundException("vision/$name.rgb(.gz) not in assets: $names")
         }
         val nl = bytes.indexOf('\n'.code.toByte())
@@ -106,7 +110,7 @@ class DeviceTest {
                 assertTrue(a.look(image("screen1"), auto = false, forceLocate = true))
                 assertTrue("no engine lines; state $state", got.await(30, TimeUnit.SECONDS))
             }
-            File(out, "timing.txt").writeText("recognition ${ms} ms\n")
+            storage.openOutputFile("timing.txt").use { it.write("recognition $ms ms\n".toByteArray()) }
         }
     }
 
@@ -145,6 +149,6 @@ class DeviceTest {
             View.MeasureSpec.makeMeasureSpec(1800, View.MeasureSpec.EXACTLY))
         v.layout(0, 0, 880, 1800)
         v.draw(c)
-        File(out, "overlay.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        storage.openOutputFile("overlay.png").use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 }

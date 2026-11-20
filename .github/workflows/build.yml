@@ -162,6 +162,7 @@ jobs:
           name: device-test-output
           path: |
             device-out/
+            app/build/outputs/connected_android_test_additional_output/
             app/build/outputs/androidTest-results/
             app/build/reports/androidTests/
           retention-days: 14

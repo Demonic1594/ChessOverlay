@@ -23,6 +23,9 @@ android {
             (project.findProperty("extraAbi") as String?)?.let { abiFilters += it }
         }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Test output files (the overlay rendering) are collected into
+        // build/outputs/connected_android_test_additional_output.
+        testInstrumentationRunnerArguments["useTestStorageService"] = "true"
     }
 
     buildTypes {
@@ -63,6 +66,8 @@ dependencies {
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:core:1.6.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.services:storage:1.5.0")
+    androidTestUtil("androidx.test.services:test-services:1.5.0")
     testImplementation("org.json:json:20240303")
     // JVM unit tests run the recognizer on the desktop ONNX Runtime.
     testImplementation("com.microsoft.onnxruntime:onnxruntime:1.20.0")
