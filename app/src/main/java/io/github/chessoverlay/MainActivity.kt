@@ -49,6 +49,9 @@ class MainActivity : Activity() {
 
         col.addView(TextView(this).apply { text = "ChessOverlay"; textSize = 26f })
         note(col, "Reads a chess board from your screen, in any app, and shows engine arrows, an evaluation bar and lines over it.")
+        note(col, "Fair play: using engine help in live games against people is cheating. Chess sites detect it " +
+            "and ban accounts. How you use this app, and what follows from it, is your responsibility.")
+            .setPadding(0, dp(8f), 0, 0)
 
         heading(col, "Recognition models")
         modelStatus = note(col, "")

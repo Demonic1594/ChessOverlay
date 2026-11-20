@@ -8,6 +8,17 @@ lines, and a grade for the move just played.
 Typical use: analyse your own games wherever they are (game archives in
 other apps, videos, puzzles, books, screenshots), and collect positions.
 
+## Fair play: your responsibility
+
+ChessOverlay is an analysis tool and has no built-in limits on where it
+runs. How you use it is up to you, and so are the consequences.
+
+Using engine assistance during a live game against another person is
+cheating. It breaks the fair-play rules of Chess.com, Lichess and every
+other chess site and over-the-board event, and they detect it and close
+accounts for it. The authors do not support that use and are not
+responsible for any penalty, ban or other consequence of misusing this app.
+
 ## Features (v1)
 
 - **Board recognition** from the screen: finds the board anywhere on screen,
@@ -68,8 +79,6 @@ to bundle it.
   inferred from king and rook positions, en passant is not known, and in
   manual mode the side to move is the side at the bottom unless a king is
   in check (⇅ overrides it).
-- Using engine help during live games breaks the fair-play rules of
-  Chess.com, Lichess and other sites, and they ban accounts for it.
 
 ## Credits and licences
 
