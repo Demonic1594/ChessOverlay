@@ -118,6 +118,7 @@ class OverlayService : Service() {
         try {
             startCapture(code, data)
             showViews()
+            running = true
             work.post { guarded("setup") { setUp() } }
         } catch (e: Exception) {
             DebugLog.e(TAG, "could not start the overlay", e)
@@ -157,7 +158,7 @@ class OverlayService : Service() {
         val n = Notification.Builder(this, CHANNEL)
             .setContentTitle("ChessOverlay is reading the screen")
             .setContentText("Tap to open settings")
-            .setSmallIcon(android.R.drawable.ic_menu_view)
+            .setSmallIcon(io.github.chessoverlay.R.drawable.ic_stat_overlay)
             .setContentIntent(open)
             .addAction(Notification.Action.Builder(null, "Stop", stop).build())
             .build()
@@ -568,6 +569,7 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         DebugLog.i(TAG, "overlay closing")
+        running = false
         auto = false
         work.removeCallbacksAndMessages(null)
         main.removeCallbacksAndMessages(null)
@@ -591,6 +593,10 @@ class OverlayService : Service() {
         const val EXTRA_CODE = "code"
         const val EXTRA_DATA = "data"
         const val ACTION_STOP = "io.github.chessoverlay.STOP"
+
+        /** The overlay is on (for the app's Start / Stop button). */
+        @Volatile var running = false
+            private set
         private const val CHANNEL = "overlay"
         private const val TAG = "Overlay"
 

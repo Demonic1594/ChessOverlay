@@ -90,13 +90,19 @@ responsible for any penalty, ban or other consequence of misusing this app.
 
 1. Install the APK (see Builds below). It targets Android API 28 on purpose
    (see Notes), so Android may warn that it was built for an older version.
-2. Builds from CI carry the recognition models. A local build without them
-   asks to **Download** them once (about 170 MB).
-3. Pick an engine; **Options** edits its settings.
-4. Tap **Initialize**: allow drawing over other apps, then screen capture.
-5. Open the app with the board. The card: ▶ analyse now · A auto mode ·
-   ⇅ side to move (auto / White / Black) · ◐ show/hide the arrows · ✕ close;
-   drag it by any part; tap the lines to fold them.
+2. The app opens on a setup checklist: board recognition (built into CI
+   builds; a local build downloads it once), permission to draw over other
+   apps, and the engine. Each item that needs something has its button.
+3. Pick an engine (Change), adjust it (Options: every UCI option it has,
+   grouped into Strength, Smotherfish, Performance and Other), or add one.
+4. Tap **Start overlay** and allow screen capture, then open the app with
+   the board. The floating card: ▶ analyse now · A auto mode · ⇅ side to
+   move (auto / White / Black) · ◐ show/hide the arrows · ✕ close; drag it
+   by any part; tap the lines to fold them.
+5. Settings take effect the next time the overlay starts; the board preview
+   in "On the board" shows the drawing with your settings at once.
+6. If a read goes wrong: Help and debug → Copy the debug log, and Share the
+   last misread screen (the screen a read failed on, as the app saw it).
 
 ## Builds
 

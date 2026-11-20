@@ -18,8 +18,9 @@
 
     <application
         android:label="ChessOverlay"
-        android:icon="@android:drawable/ic_menu_view"
-        android:theme="@android:style/Theme.Material"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.ChessOverlay"
         android:extractNativeLibs="true"
         android:allowBackup="false">
 
@@ -30,6 +31,17 @@
             </intent-filter>
         </activity>
         <activity android:name=".EngineOptionsActivity" android:label="Engine options" />
+
+        <!-- Shares the last misread screen (Help and debug). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
         <service
             android:name=".overlay.OverlayService"

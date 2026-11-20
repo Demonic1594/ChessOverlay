@@ -7,3 +7,4 @@ captures/
 app/src/main/jniLibs/
 models/
 app/src/main/assets/models/
+.kotlin/

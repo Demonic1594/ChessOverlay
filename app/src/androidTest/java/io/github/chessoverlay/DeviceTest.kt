@@ -69,7 +69,37 @@ class DeviceTest {
     @Test fun mainScreenStarts() {
         ActivityScenario.launch(MainActivity::class.java).use { s ->
             s.onActivity { a -> assertTrue("main screen finished at once", !a.isFinishing) }
+            Thread.sleep(1500)   // engines listed in the background
+            s.onActivity { a -> saveWholePage(a.findViewById(R.id.content), a.window.decorView.width, "main.png") }
         }
+    }
+
+    @Test fun engineOptionsScreen() {
+        val engine = EngineRegistry(ctx).bundled().firstOrNull()
+        assumeTrue("no bundled engine for this ABI", engine != null)
+        val intent = android.content.Intent(ctx, EngineOptionsActivity::class.java).putExtra("engine", engine!!.id)
+        ActivityScenario.launch<EngineOptionsActivity>(intent).use { s ->
+            val t0 = System.currentTimeMillis()
+            var ready = false
+            while (!ready && System.currentTimeMillis() - t0 < 30_000) {
+                Thread.sleep(300)
+                s.onActivity { a -> ready = a.findViewById<android.view.ViewGroup>(R.id.groups).childCount > 0 }
+            }
+            assertTrue("engine options did not load", ready)
+            s.onActivity { a -> saveWholePage(a.findViewById(R.id.content), a.window.decorView.width, "engine_options.png") }
+        }
+    }
+
+    /** The whole scrolling page, not only what fits on the screen, as a PNG for review. */
+    private fun saveWholePage(content: View, width: Int, name: String) {
+        content.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        content.layout(0, 0, content.measuredWidth, content.measuredHeight)
+        val bmp = Bitmap.createBitmap(content.measuredWidth, content.measuredHeight, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.drawColor(Color.rgb(0x0F, 0x11, 0x13))
+        content.draw(c)
+        storage.openOutputFile(name).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
     @Test fun bundledEngineAnalysesOnAndroid() {
