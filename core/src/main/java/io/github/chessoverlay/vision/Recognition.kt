@@ -8,4 +8,10 @@ data class Recognition(
     val orientationConfidence: Float,
     val corners: List<FloatArray>,
     val legalityChanges: Int,
+    /** The placement as drawn (top-left square first), whichever way round the board is. */
+    val drawn: String = if (blackAtBottom) Fen.flip(placement) else placement,
+    /** Each drawn square's class probabilities (Fen.CLASSES order), when the model gave them. */
+    val drawnProbs: List<FloatArray>? = null,
+    /** The model's probability that Black is at the bottom. */
+    val blackBottomP: Float = if (blackAtBottom) orientationConfidence else 1f - orientationConfidence,
 )

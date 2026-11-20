@@ -105,7 +105,8 @@ class TrackerTest {
         val a = Board.fromPlacement(start)
         t.accept(render(a), rec(a), null)
         val b = after(start, "e2e4")
-        val bad = rec(b).copy(placement = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPPPPPP/RNBQKBNR")  // 17 white pieces
+        val misread = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPPPPPP/RNBQKBNR"  // 17 white pieces
+        val bad = rec(b).copy(placement = misread, drawn = misread)
         assertTrue(t.accept(render(b), bad, null) is BoardTracker.Result.Invalid)
         assertEquals(start, t.board!!.placement())
         assertEquals(2, t.changedSquares(render(b)))

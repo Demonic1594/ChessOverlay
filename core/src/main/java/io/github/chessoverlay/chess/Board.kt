@@ -186,7 +186,9 @@ class Board private constructor(private val sq: CharArray) {
                 when {
                     df == 0 && dr == dir -> t == '.'
                     df == 0 && dr == 2 * dir -> from / 8 == start && t == '.' && sq[from + 8 * dir] == '.'
-                    kotlin.math.abs(df) == 1 && dr == dir -> true  // a capture, or en passant onto an empty square
+                    // A capture, or en passant: onto an empty square only past an enemy pawn.
+                    kotlin.math.abs(df) == 1 && dr == dir ->
+                        t != '.' || sq[to - 8 * dir] == (if (p.isUpperCase()) 'p' else 'P')
                     else -> false
                 }
             }
@@ -194,6 +196,36 @@ class Board private constructor(private val sq: CharArray) {
                 (dr == 0 && kotlin.math.abs(df) == 2 && from % 8 == 4 && (from / 8 == 0 || from / 8 == 7))
             else -> reaches(from, to)
         }
+    }
+
+    /**
+     * The moves `white` can make (UCI, promotions included) that do not
+     * leave its own king in check. Castling rights and en passant timing
+     * cannot be seen on a board, so they are allowed when the pieces fit.
+     */
+    fun legalMoves(white: Boolean): List<String> {
+        val out = ArrayList<String>()
+        for (from in 0..63) {
+            val p = sq[from]
+            if (p == '.' || p.isUpperCase() != white) continue
+            for (to in 0..63) {
+                if (!canMove(from, to)) continue
+                if (p.lowercaseChar() == 'k' && kotlin.math.abs(to - from) == 2) {
+                    // Castling: the rook in its corner, the squares between empty.
+                    val rook = if (to > from) from + 3 else from - 4
+                    if (sq[rook] != (if (white) 'R' else 'r')) continue
+                    if ((minOf(from, rook) + 1 until maxOf(from, rook)).any { sq[it] != '.' }) continue
+                }
+                val base = squareName(from) + squareName(to)
+                val promo = p.lowercaseChar() == 'p' && (to / 8 == 7 || to / 8 == 0)
+                for (m in if (promo) listOf("${base}q", "${base}r", "${base}b", "${base}n") else listOf(base)) {
+                    val b = copy()
+                    b.play(m)
+                    if (!b.inCheck(white)) out += m
+                }
+            }
+        }
+        return out
     }
 
     /** Whether the knight, bishop, rook or queen on `from` attacks `to`. */

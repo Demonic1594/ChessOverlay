@@ -107,41 +107,52 @@ class BoardTracker {
      * it out). `strict` (auto mode): a small change that neither one nor two
      * moves explain is most likely a misread, so it counts only when the
      * next read sees the same. Returns what changed.
+     *
+     * During a game the reading goes through PositionDecoder: the position
+     * the game can reach (no move, a move, a move each, on a board that may
+     * have been turned round) that the model finds most likely. Without
+     * that, the plain reading, turned the way Orientation decides.
      */
     fun accept(img: Img, rec: Recognition, sideOverride: Boolean?, strict: Boolean = false): Result {
-        val b = try {
-            Board.fromPlacement(rec.placement)
+        val prev = board
+        val prevWhite = whiteToMove
+        val decoded = if (prev != null) PositionDecoder.decode(prev, prevWhite, blackAtBottom, rec,
+            if (strict) PositionDecoder.TAU_FOLLOWING else PositionDecoder.TAU_BY_HAND) else null
+        val black = decoded?.blackAtBottom
+            ?: Orientation.decide(rec.drawn, rec.blackBottomP, prior = if (prev != null) blackAtBottom else null)
+        val b = decoded?.board ?: try {
+            Board.fromPlacement(Orientation.whiteView(rec.drawn, black))
         } catch (e: IllegalArgumentException) {
             return Result.Invalid(e.message ?: "bad board")
         }
-        val prev = board
-        val prevWhite = whiteToMove
-        val flipped = prev != null && rec.blackAtBottom != blackAtBottom
-        val sameBoard = prev != null && !flipped && prev.placement() == b.placement()
+        val sameBoard = prev != null && prev.placement() == b.placement()
         if (sameBoard && sideOverride == null) {
+            // The same position (perhaps turned round): the same game.
             corners = rec.corners
+            blackAtBottom = black
             remember(img, rec.corners)
             return Result.Same
         }
 
-        val linked = prev != null && !flipped
-        val move = if (linked) Board.findMove(prev!!, b) else null
-        // Both sides moved before the screen was read (a quick reply): the
-        // same side is to move again.
-        val two = if (linked && move == null) Board.findTwoMoves(prev!!, b, prevWhite) else null
-        if (linked && move == null && two == null && strict && sideOverride == null) {
-            val diff = (0..63).count { prev!![it] != b[it] }
+        // How the game got here: one move, or a move each (a quick reply).
+        val moves: List<String>? = decoded?.moves ?: prev?.let { p ->
+            Board.findMove(p, b)?.let { listOf(it) } ?: Board.findTwoMoves(p, b, prevWhite)?.toList()
+        }
+        if (prev != null && moves == null && strict && sideOverride == null) {
+            val diff = (0..63).count { prev[it] != b[it] }
             if (diff <= SMALL_CHANGE && suspect != b.placement()) {
                 suspect = b.placement()
                 return Result.Invalid("no move explains it; reading again")
             }
         }
         suspect = null
+        val move = moves?.singleOrNull()
         val prefer: Boolean = sideOverride ?: when {
             move != null -> !b[Board.squareOf(move.substring(2, 4))].isUpperCase()
-            two != null -> prevWhite
-            linked -> Board.mover(prev!!, b)?.let { !it } ?: !rec.blackAtBottom
-            else -> !rec.blackAtBottom
+            moves != null && moves.size == 2 -> prevWhite
+            b.placement() == START -> true   // a new game: White begins, whichever side is at the bottom
+            prev != null -> Board.mover(prev, b)?.let { !it } ?: !black
+            else -> !black
         }
         // A position no game can reach is a misread (a piece caught mid-move):
         // keep the last good read, and its colours, so the change is still
@@ -149,18 +160,20 @@ class BoardTracker {
         val white = Board.sideToMove(b, prefer)
             ?: return Result.Invalid(b.problem(prefer) ?: "not a legal position")
         corners = rec.corners
-        blackAtBottom = rec.blackAtBottom
+        blackAtBottom = black
         remember(img, rec.corners)
         if (sameBoard && white == prevWhite) return Result.Same
         board = b
         whiteToMove = white
-        return Result.Position(b, white, move, if (flipped) null else prev, prevWhite)
+        return Result.Position(b, white, move, prev, prevWhite)
     }
 
     /** `changed` squares look different; `blind` ones had too few uncovered points to tell. */
     data class Comparison(val changed: Int, val blind: Int)
 
     companion object {
+        private const val START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
+
         /** Changed squares up to which an unexplained change is suspected to be a misread. */
         private const val SMALL_CHANGE = 4
 
