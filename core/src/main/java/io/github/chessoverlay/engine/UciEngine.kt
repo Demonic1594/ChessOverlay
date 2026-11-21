@@ -40,6 +40,8 @@ class UciEngine(
     @Volatile private var bestMove: CountDownLatch? = null
     @Volatile private var listener: ((List<PvLine>, Boolean) -> Unit)? = null
     @Volatile private var collector = PvCollector(1)
+    /** Counts lines added, so a flush knows whether more came after it was planned. */
+    @Volatile private var lineSeq = 0L
 
     // What the engine said since the last "go", for the watchdog and the log.
     @Volatile var goAt = 0L
@@ -189,6 +191,23 @@ class UciEngine(
         }
     }
 
+    /**
+     * A set of lines still incomplete FLUSH_MS after its last line is all
+     * this iteration gives (fewer legal moves than lines asked, or a capped
+     * depth): pass it on rather than wait for lines that never come.
+     */
+    private fun flushLater(c: PvCollector, seq: Long) {
+        try {
+            flusher.schedule({
+                if (seq == lineSeq && c === collector) {
+                    val set = synchronized(c) { c.flush() }
+                    if (set != null) notify(set, false)
+                }
+            }, FLUSH_MS, TimeUnit.MILLISECONDS)
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+        }
+    }
+
     private fun noteSinceGo(line: String) {
         if (goAt == 0L) return
         val t = System.currentTimeMillis() - goAt
@@ -220,14 +239,21 @@ class UciEngine(
                     PvLine.parse(line)?.let { pv ->
                         if (pv.pv.isNotEmpty()) {
                             pvSinceGo++
-                            collector.add(pv)?.let { notify(it, false) }
+                            val c = collector
+                            val seq = ++lineSeq
+                            var waiting = false
+                            val set = synchronized(c) { c.add(pv).also { waiting = c.waiting } }
+                            if (set != null) notify(set, false)
+                            if (waiting) flushLater(c, seq)
                         }
                     }
                 }
                 line.startsWith("bestmove") -> {
                     noteSinceGo(line)
                     bestMoveLine = line
-                    notify(collector.finish(), true)
+                    val c = collector
+                    lineSeq++
+                    notify(synchronized(c) { c.finish() }, true)
                     bestMove?.countDown()
                 }
             }
@@ -244,5 +270,12 @@ class UciEngine(
     companion object {
         private const val TAG = "UciEngine"
         private const val SINCE_GO_LINES = 16
+        /** Quiet this long after an incomplete set of lines: the set is complete. */
+        const val FLUSH_MS = 120L
+        private val flusher by lazy {
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+                Thread(r, "uci-flush").apply { isDaemon = true }
+            }
+        }
     }
 }

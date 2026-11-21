@@ -144,4 +144,42 @@ class EngineHostTest {
         }
         dir.deleteRecursively()
     }
+
+    /**
+     * From a phone: after 23...Qg3+ White had two legal moves, three lines
+     * were asked for, and a strength limit stopped the engine at depth 1:
+     * two lines, then nothing until "stop". They must still be shown.
+     */
+    @Test
+    fun fewerLinesThanAskedAreShown() {
+        val dir = createTempDir("two")
+        val bin = File(dir, "two.sh")
+        bin.writeText("""
+            #!/bin/sh
+            while read -r line; do
+              case "${'$'}line" in
+                uci) echo "id name Two"; echo "option name MultiPV type spin default 1 min 1 max 5"; echo uciok ;;
+                isready) echo readyok ;;
+                go*) echo "info depth 1 seldepth 13 multipv 1 score cp 5 nodes 10969 pv f1f2 g4e2"
+                     echo "info depth 1 seldepth 6 multipv 2 score cp -10 nodes 10969 pv e1d1" ;;
+                stop) echo "bestmove f1f2" ;;
+                quit) exit 0 ;;
+              esac
+            done
+        """.trimIndent() + "\n")
+        bin.setExecutable(true)
+        val updates = CopyOnWriteArrayList<Pair<Long, AnalysisUpdate>>()
+        EngineHost(bin, dir, emptyMap(), onUpdate = { updates.add(System.currentTimeMillis() to it) }, onStatus = {},
+            silentMs = 5_000).use { host ->
+            val t0 = System.currentTimeMillis()
+            host.analyse("r4rk1/p4p2/2p2p1p/Q7/2P1p1b1/6q1/PB1PB1P1/1R2KR2 w - - 0 1", 3, 0)
+            val until = t0 + 3_000
+            while (System.currentTimeMillis() < until && updates.none { it.second.lines.isNotEmpty() }) Thread.sleep(20)
+            val first = updates.firstOrNull { it.second.lines.isNotEmpty() }
+            assertTrue("the two lines arrive though three were asked", first != null && first.second.lines.size == 2)
+            assertTrue("not finished: the search goes on", !first!!.second.finished)
+            println("two lines after ${first.first - t0} ms (engine start included)")
+        }
+        dir.deleteRecursively()
+    }
 }

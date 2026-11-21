@@ -141,6 +141,18 @@ class PvCollector(private val expected: Int) {
     /** The search ended: the last whole set (or the partial one, if none was whole). */
     fun finish(): List<PvLine> = if (complete.isNotEmpty()) complete else pending.values.toList()
 
+    /**
+     * No more lines came for a while: the set so far is the whole iteration.
+     * An engine gives fewer lines than asked when the position has fewer
+     * legal moves (two moves out of check, with three lines asked), and one
+     * whose depth is capped (a strength limit) gives no next iteration that
+     * would close this one. Null if nothing is waiting.
+     */
+    fun flush(): List<PvLine>? = if (pending.isEmpty()) null else release()
+
+    /** Lines of an unfinished set are waiting. */
+    val waiting: Boolean get() = pending.isNotEmpty()
+
     private fun release(): List<PvLine> {
         complete = pending.values.toList()
         pending.clear()
