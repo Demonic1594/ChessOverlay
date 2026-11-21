@@ -201,6 +201,17 @@ class Analyst(
         best = null
         gate.start(System.currentTimeMillis())
         val fen = board.fen(white)
+        val over = board.outcome(white)
+        if (over != null) {
+            // No move to search for: say so instead of asking the engine.
+            DebugLog.i(TAG, "$over: $fen" + (move?.let { " after $it" } ?: ""))
+            requestId = -1
+            pendingGrade = null
+            engine.stop()
+            publish(OverlayState(status = over, corners = tracker.corners, blackAtBottom = tracker.blackAtBottom,
+                board = board, whiteToMove = white, playedMove = move))
+            return
+        }
         DebugLog.i(TAG, "analyse $fen" + (move?.let { " after $it" } ?: ""))
         publish(OverlayState(
             status = ANALYSING,

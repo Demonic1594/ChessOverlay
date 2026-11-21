@@ -150,4 +150,14 @@ class CardLayoutTest {
         assertEquals(listOf("Qxa8+", "Bc8", "Qxc8#"), io.github.chessoverlay.overlay.CardLayer.san(
             Board.fromPlacement("r3kb2/p1pb1p1r/1pQp1B2/4P2p/8/2N5/PPP2PPP/R3KBNR"), mate))
     }
+
+    @Test
+    fun outcomes() {
+        // From a phone log: 1...Kb4 2.Bd2 is mate (a5 is seen by the bishop through the king's square).
+        assertEquals("Checkmate: White wins", Board.fromPlacement("8/8/6R1/3P4/1kP1N3/pP5P/P2B2P1/5K2").outcome(false))
+        assertEquals("Stalemate: a draw", Board.fromPlacement("7k/5Q2/6K1/8/8/8/8/8").outcome(false))
+        assertEquals("Checkmate: Black wins", Board.fromPlacement("rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR").outcome(true))
+        assertNull(Board.fromPlacement("8/8/6R1/3P4/1kP1N3/pP5P/P2B2P1/5K2").outcome(true))
+        assertNull(Board.fromPlacement("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR").outcome(true))
+    }
 }

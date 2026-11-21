@@ -73,6 +73,12 @@ class Board private constructor(private val sq: CharArray) {
         return k >= 0 && attacked(k, !white)
     }
 
+    /** "Checkmate: White wins", "Stalemate", or null while `whiteToMove` has a legal move. */
+    fun outcome(whiteToMove: Boolean): String? {
+        if (legalMoves(whiteToMove).isNotEmpty()) return null
+        return if (inCheck(whiteToMove)) "Checkmate: ${if (whiteToMove) "Black" else "White"} wins" else "Stalemate: a draw"
+    }
+
     /** Castling rights that the placement allows: king and rook on their
      *  original squares. (Whether they moved before cannot be seen.) */
     fun castling(): String {

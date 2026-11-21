@@ -139,6 +139,12 @@ class EngineHost(
     private fun endedWithoutLines(r: Request, e: UciEngine) {
         if (closed || current !== r || engine !== e) return  // stopped by us for a newer request
         if (r.movetimeMs > 0 && e.pvSinceGo > 0) return
+        val bm = e.bestMoveLine?.split(" ")?.getOrNull(1)
+        if (bm == "(none)" || bm == "0000") {
+            // Checkmate or stalemate: there is no line to give.
+            DebugLog.i(TAG, "${e.name}: no legal move in ${r.fen} (${e.bestMoveLine})")
+            return
+        }
         silent(r, e, "ended the search without a line (${e.bestMoveLine})")
     }
 

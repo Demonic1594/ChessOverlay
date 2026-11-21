@@ -115,4 +115,33 @@ class EngineHostTest {
         println(r.text)
         assertTrue(r.text, r.ok)
     }
+
+    /** Checkmate or stalemate: "bestmove (none)" is an answer, not a silent engine. */
+    @Test
+    fun noLegalMoveIsNotAFailure() {
+        val dir = createTempDir("mated")
+        val bin = File(dir, "mated.sh")
+        bin.writeText("""
+            #!/bin/sh
+            while read -r line; do
+              case "${'$'}line" in
+                uci) echo "id name Mated"; echo uciok ;;
+                isready) echo readyok ;;
+                go*) echo "info depth 0 score mate 0"; echo "bestmove (none)" ;;
+                quit) exit 0 ;;
+              esac
+            done
+        """.trimIndent() + "\n")
+        bin.setExecutable(true)
+        val updates = CopyOnWriteArrayList<AnalysisUpdate>()
+        val status = CopyOnWriteArrayList<String>()
+        EngineHost(bin, dir, emptyMap(), onUpdate = { updates.add(it) }, onStatus = { status.add(it) },
+            silentMs = 500).use { host ->
+            host.analyse("8/8/6R1/3P4/1kP1N3/pP5P/P2B2P1/5K2 b - - 0 1", 3, 0)
+            Thread.sleep(1500)
+            assertTrue("finished", updates.any { it.finished })
+            assertTrue("no restart: fallback ${host.fallback}, status $status", host.fallback == 0 && status.isEmpty())
+        }
+        dir.deleteRecursively()
+    }
 }
