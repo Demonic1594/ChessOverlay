@@ -4,12 +4,15 @@ import io.github.chessoverlay.DebugLog
 import io.github.chessoverlay.chess.Board
 import io.github.chessoverlay.engine.AnalysisUpdate
 import io.github.chessoverlay.engine.EngineHost
+import io.github.chessoverlay.engine.FirstLinesGate
 import io.github.chessoverlay.engine.LineStabilizer
 import io.github.chessoverlay.engine.PvLine
 import io.github.chessoverlay.vision.BoardTracker
 import io.github.chessoverlay.vision.Img
 import io.github.chessoverlay.vision.Recognizer
 import io.github.chessoverlay.vision.plausibleBoard
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * Screen image -> board (BoardTracker) -> engine (EngineHost) -> OverlayState.
@@ -47,20 +50,36 @@ class Analyst(
     @Volatile private var best: PvLine? = null          // best line of the current position
     private var pendingGrade: Pending? = null
     private var lostReads = 0
-    @Volatile private var startedAt = 0L
+    private val gate = FirstLinesGate<AnalysisUpdate>(MIN_DEPTH, FIRST_LINES_MS)
+    private var releaseFor = -1L
 
     private data class Pending(val move: String, val before: Board, val bestBefore: PvLine, val whiteBefore: Boolean)
 
     /** Engine results, from the engine thread. */
     fun onEngine(u: AnalysisUpdate): Unit = synchronized(lock) {
         if (u.id != requestId) return
-        val s = state
         val top = u.lines.firstOrNull()
         // The first, shallow iterations change their minds every few
-        // milliseconds: show lines from depth MIN_DEPTH (or after
-        // FIRST_LINES_MS, for engines whose depths grow slowly).
-        if (s.lines.isEmpty() && !u.finished && top != null && top.depth < MIN_DEPTH &&
-            System.currentTimeMillis() - startedAt < FIRST_LINES_MS) return
+        // milliseconds: lines from depth MIN_DEPTH show at once, shallower
+        // ones after FIRST_LINES_MS if nothing deeper came (an engine whose
+        // depth is capped, e.g. by a strength limit, may stay at depth 1).
+        val now = System.currentTimeMillis()
+        if (top != null && !gate.offer(u, top.depth, u.finished, now)) {
+            if (releaseFor != u.id) {
+                releaseFor = u.id
+                val id = u.id
+                timer.schedule({
+                    synchronized(lock) { if (id == requestId) gate.release()?.let { show(it) } }
+                }, (gate.releaseAt - now).coerceAtLeast(0), TimeUnit.MILLISECONDS)
+            }
+            return
+        }
+        show(u)
+    }
+
+    private fun show(u: AnalysisUpdate) {
+        val s = state
+        val top = u.lines.firstOrNull()
         if (top != null) best = top
         var mark = s.lastMove
         val p = pendingGrade
@@ -180,7 +199,7 @@ class Analyst(
         pendingGrade = if (annotate && move != null && previous != null && bestBefore != null &&
             previousWhite != white) Pending(move, previous, bestBefore, previousWhite) else null
         best = null
-        startedAt = System.currentTimeMillis()
+        gate.start(System.currentTimeMillis())
         val fen = board.fen(white)
         DebugLog.i(TAG, "analyse $fen" + (move?.let { " after $it" } ?: ""))
         publish(OverlayState(
@@ -230,6 +249,11 @@ class Analyst(
         /** Squares that differ from the last read beyond which the board itself moved (a move changes 2 to 8). */
         private const val RELOCATE_SQUARES = 12
         private const val FIRST_LINES_MS = 300L
+
+        /** Shows held first lines when their wait is over (one daemon thread for all). */
+        private val timer by lazy {
+            Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "first-lines").apply { isDaemon = true } }
+        }
 
         /** Grade by the win chance the mover lost (Lichess thresholds). */
         fun grade(before: PvLine, whiteBefore: Boolean, after: PvLine, whiteAfter: Boolean,

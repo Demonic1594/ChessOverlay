@@ -49,6 +49,9 @@ class EngineHost(
     @Volatile var fallback = 0
         private set
     @Volatile private var startedAt = 0L
+    /** The options sent at the last start, as "name=value". */
+    @Volatile var sentOptions: List<String> = emptyList()
+        private set
     @Volatile private var firstLinesPending = false
 
     private data class Request(val id: Long, val fen: String, val multipv: Int, val movetimeMs: Long)
@@ -179,6 +182,7 @@ class EngineHost(
             e.start(startTimeoutMs)
             engineName = e.name
             val sent = applyOptions(e)
+            sentOptions = sent
             if (!e.isReady()) throw IllegalStateException("no readyok after setting options")
             DebugLog.i(TAG, "started ${e.name} (${executable.name}) in ${System.currentTimeMillis() - now} ms; " +
                 "${e.options.size} options; set ${sent.joinToString(", ")}" +

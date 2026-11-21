@@ -25,6 +25,7 @@ object EngineCheck {
             onStatus = { status.add(it) })
         var name: String
         var fallback: Int
+        var sent: List<String>
         host.use {
             val id = host.analyse(FEN, 3, 0)
             while (true) {
@@ -37,6 +38,7 @@ object EngineCheck {
             }
             name = host.engineName
             fallback = host.fallback
+            sent = host.sentOptions
         }
         val first = updates.firstOrNull { it.second.lines.isNotEmpty() }
         val last = updates.lastOrNull { it.second.lines.isNotEmpty() }?.second
@@ -51,6 +53,7 @@ object EngineCheck {
         } else {
             sb.append("No lines within ${secs(System.currentTimeMillis() - t0)}.")
         }
+        if (sent.isNotEmpty()) sb.append("\nOptions: ").append(sent.joinToString(", "))
         if (fallback > 0) sb.append("\nIt was silent at first and was restarted (now: ").append(
             when (fallback) { 1 -> "same settings"; 2 -> "one thread"; else -> "one thread, no smother prover" }).append(").")
         if (status.isNotEmpty()) sb.append("\nMessages: ").append(status.distinct().joinToString("; "))

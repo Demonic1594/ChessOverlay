@@ -176,3 +176,39 @@ class LineStabilizerTest {
         org.junit.Assert.assertEquals("d2d4", s.offer(lines(12, "d2d4", "e2e4"), true)[0].pv[0])
     }
 }
+
+class FirstLinesGateTest {
+    private val gate = io.github.chessoverlay.engine.FirstLinesGate<String>(minDepth = 8, waitMs = 300)
+
+    @Test
+    fun depthCappedAtOneIsShownAfterTheWait() {
+        // UCI_LimitStrength with Analysis Elo 1320: one iteration at depth 1, then nothing.
+        gate.start(1000)
+        org.junit.Assert.assertFalse(gate.offer("d1", 1, false, 1002))
+        org.junit.Assert.assertEquals(1300L, gate.releaseAt)
+        org.junit.Assert.assertEquals("d1", gate.release())
+        org.junit.Assert.assertNull(gate.release())
+    }
+
+    @Test
+    fun deeperLinesInTimeReplaceTheHeldOnes() {
+        gate.start(0)
+        org.junit.Assert.assertFalse(gate.offer("d1", 1, false, 5))
+        org.junit.Assert.assertFalse(gate.offer("d4", 4, false, 20))
+        org.junit.Assert.assertTrue(gate.offer("d8", 8, false, 60))
+        org.junit.Assert.assertNull("already shown", gate.release())
+        org.junit.Assert.assertTrue("after that everything shows", gate.offer("d9", 9, false, 70))
+    }
+
+    @Test
+    fun lateOrFinishedLinesShowAtOnce() {
+        gate.start(0)
+        org.junit.Assert.assertTrue(gate.offer("d2", 2, false, 400))
+        gate.start(0)
+        org.junit.Assert.assertTrue(gate.offer("done", 1, true, 10))
+        gate.start(0)
+        org.junit.Assert.assertFalse(gate.offer("d1", 1, false, 10))
+        gate.start(500)  // the next position: nothing held over
+        org.junit.Assert.assertNull(gate.release())
+    }
+}

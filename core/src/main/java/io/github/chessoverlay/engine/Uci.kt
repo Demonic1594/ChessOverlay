@@ -189,3 +189,41 @@ class LineStabilizer(private val arrows: Int, private val pathPlies: Int) {
         const val DEEP = 18
     }
 }
+
+/**
+ * The first, shallow iterations of a search change their minds every few
+ * milliseconds, so lines below `minDepth` that arrive within `waitMs` of the
+ * start are held back. Held, never dropped: if nothing deeper has come by
+ * [releaseAt], [release] gives the last held lines. An engine whose depth is
+ * capped (a strength limit such as UCI_LimitStrength with a low Elo) may
+ * never go deeper than depth 1.
+ */
+class FirstLinesGate<T>(private val minDepth: Int, private val waitMs: Long) {
+    private var startedAt = 0L
+    private var shown = false
+    private var held: T? = null
+
+    fun start(now: Long) { startedAt = now; shown = false; held = null }
+
+    val releaseAt: Long get() = startedAt + waitMs
+
+    /** True: show `item` now. False: it is held until [releaseAt]. */
+    fun offer(item: T, depth: Int, finished: Boolean, now: Long): Boolean {
+        if (shown || finished || depth >= minDepth || now - startedAt >= waitMs) {
+            shown = true
+            held = null
+            return true
+        }
+        held = item
+        return false
+    }
+
+    /** At [releaseAt]: the held lines, unless something was shown meanwhile. */
+    fun release(): T? {
+        if (shown) return null
+        val h = held ?: return null
+        held = null
+        shown = true
+        return h
+    }
+}
