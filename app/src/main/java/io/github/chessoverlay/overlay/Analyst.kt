@@ -97,18 +97,52 @@ class Analyst(
     /** The game on screen; read it only from the thread that calls look(). */
     val board: BoardTracker get() = tracker
 
+    /** The position analysed from a move seen at once, until look() has checked it. */
+    private var fastShown: BoardTracker.Result.Position? = null
+
+    /**
+     * Analyse at once the move(s) the changed squares show (see
+     * BoardTracker.explainChange), before the recognizer: look() then reads
+     * the clean capture and confirms or corrects it. `px`, `cover`: the
+     * change-detection colours when the read was decided. False if no single
+     * move explains the change (the recognizer decides alone).
+     */
+    @Synchronized
+    fun fastLook(px: IntArray, cover: BoardTracker.Cover?): Boolean {
+        if (sideOverride != null) return false   // a side set by hand: every reading goes by it
+        val t0 = System.nanoTime()
+        val moves = tracker.explainChange(px, cover) ?: return false
+        val r = tracker.applyFast(moves)
+        fastShown = r
+        DebugLog.i(TAG, "seen at once: ${moves.joinToString(" ")} in ${(System.nanoTime() - t0) / 1_000_000} ms")
+        start(r.board, r.whiteToMove, r.move, r.previous, r.previousWhiteToMove)
+        return true
+    }
+
+    /** The capture was thrown away: the move seen at once is checked by the next read. */
+    @Synchronized
+    fun dropFast() {
+        fastShown = null
+        tracker.abandonFast()
+    }
+
     /**
      * Read `img` and analyse if the position is new. `auto` = called by auto
      * mode: failures are logged, not shown, and the last analysis stays.
      */
     @Synchronized
     fun look(img: Img, auto: Boolean, forceLocate: Boolean = false): Look {
+        // A move seen at once is judged from the position before it.
+        val fast = fastShown
+        fastShown = null
+        tracker.abandonFast()
         // Known board position on screen: read the squares only, unless most
         // squares look different from the last read (a move changes a few):
         // then the board itself moved, zoomed or turned, and is found again.
         val known = tracker.corners
         val changed = if (known != null) tracker.changedSquares(img) else 64
         var located = forceLocate || known == null || changed >= RELOCATE_SQUARES
+        val t0 = System.nanoTime()
         var rec = try {
             recognizer.recognise(img, knownCorners = if (located) null else known)
         } catch (e: Exception) {
@@ -116,7 +150,8 @@ class Analyst(
             if (!auto) publish(state.copy(status = "Recognition failed: ${e.message}"))
             return Look.FAILED
         }
-        DebugLog.i(TAG, "read ${if (located) "after locating" else "at known corners"} ($changed squares changed): " +
+        val ms = (System.nanoTime() - t0) / 1_000_000
+        DebugLog.i(TAG, "read ${if (located) "after locating" else "at known corners"} ($changed squares changed) in $ms ms: " +
             "${rec.placement} ${if (rec.blackAtBottom) "black" else "white"} at bottom, sure ${(rec.confidence * 100).toInt()}%, " +
             "corners ${rec.corners.joinToString(" ") { "${it[0].toInt()},${it[1].toInt()}" }}")
         if (rec.confidence < minConfidence && !located) {
@@ -134,7 +169,7 @@ class Analyst(
             // screen); drop it, so no arrows hang over something else.
             if (auto && tracker.corners != null && ++lostReads >= 3) {
                 lostReads = 0
-                tracker.reset()
+                tracker.reset(keepGame = true)   // the game goes on when the board is back
                 synchronized(lock) {
                     requestId = -1
                     engine.stop()
@@ -157,6 +192,32 @@ class Analyst(
                 rec = again
             }
         }
+        if (fast != null) {
+            val confirmed = r is BoardTracker.Result.Position && r.whiteToMove == fast.whiteToMove &&
+                r.board.placement() == fast.board.placement()
+            when {
+                confirmed -> {
+                    // Already analysed; only the drawing may need turning round.
+                    synchronized(lock) {
+                        val s = state
+                        if (s.blackAtBottom != tracker.blackAtBottom) publish(s.copy(blackAtBottom = tracker.blackAtBottom, corners = tracker.corners))
+                    }
+                    return Look.NEW
+                }
+                r is BoardTracker.Result.Invalid -> {
+                    // Unreadable capture: the move stays shown; the next read checks it again.
+                    DebugLog.i(TAG, "not analysable: ${r.reason} (${rec.placement}); the move seen at once stays until the next read")
+                    return Look.INVALID
+                }
+                r is BoardTracker.Result.Same -> {
+                    DebugLog.w(TAG, "the move seen at once (${fast.move ?: "two moves"}) was wrong: the board did not change")
+                    start(tracker.board!!, tracker.whiteToMove, null, null, true)
+                    return Look.NEW
+                }
+                r is BoardTracker.Result.Position ->
+                    DebugLog.w(TAG, "the move seen at once (${fast.move ?: "two moves"}) was wrong: the reading says ${r.move ?: r.board.placement()}")
+            }
+        }
         return when (r) {
             is BoardTracker.Result.Same -> {
                 // Same position, but the board may have been turned round or moved a little.
@@ -166,7 +227,8 @@ class Analyst(
                         publish(s.copy(blackAtBottom = tracker.blackAtBottom, corners = tracker.corners))
                     }
                 }
-                if (!auto && state.board == null) start(tracker.board!!, tracker.whiteToMove, null, null, true)
+                // Nothing analysed (the board came back after being away, or a read by hand): analyse it.
+                if (state.board == null) start(tracker.board!!, tracker.whiteToMove, null, null, true)
                 else if (!auto && state.status.isNotEmpty() && state.status != ANALYSING) publish(state.copy(status = ""))
                 Look.SAME
             }
@@ -194,6 +256,9 @@ class Analyst(
     }
 
     private fun start(board: Board, white: Boolean, move: String?, previous: Board?, previousWhite: Boolean): Unit = synchronized(lock) {
+        // Already analysing exactly this (a move seen at once, read again): keep going.
+        val s = state
+        if (requestId != -1L && s.board?.placement() == board.placement() && s.whiteToMove == white) return
         stabilizer = LineStabilizer(arrows, pathPlies)
         val bestBefore = best
         pendingGrade = if (annotate && move != null && previous != null && bestBefore != null &&
@@ -229,7 +294,7 @@ class Analyst(
 
     /** Drop the board (it moved: the screen turned); show `why` until it is found again. */
     fun forget(why: String) {
-        tracker.reset()
+        tracker.reset(keepGame = true)
         synchronized(lock) {
             requestId = -1
             engine.stop()
@@ -259,7 +324,7 @@ class Analyst(
         private const val MIN_DEPTH = 8
         /** Squares that differ from the last read beyond which the board itself moved (a move changes 2 to 8). */
         private const val RELOCATE_SQUARES = 12
-        private const val FIRST_LINES_MS = 300L
+        private const val FIRST_LINES_MS = 150L
 
         /** Shows held first lines when their wait is over (one daemon thread for all). */
         private val timer by lazy {

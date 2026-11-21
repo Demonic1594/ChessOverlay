@@ -64,17 +64,28 @@ responsible for any penalty, ban or other consequence of misusing this app.
   whose colour chip matches its arrow. It sits next to the board on its own;
   drag it anywhere, tap the lines to fold them.
 - **Auto mode** (on by default) follows the screen without flicker: about
-  16 times a second it compares 49 points per square with the last read,
+  33 times a second it compares 49 points per square with the last read,
   with the overlay showing (points under its own drawing are skipped). When
-  at least two squares changed and the board has been still for 120 ms it
+  at least two squares changed and the board has been still for 80 ms it
   reads the board (hiding the arrows for one frame, once per move); a
   capture that no longer matches the still board (a piece started gliding)
   is thrown away, so pieces are never read in flight. It works out the
   exact move played, or both moves when the reply came first, and so the
   side to move. A small change that no move explains must be read the same
-  way twice; misreads never replace the analysis.
+  way twice; misreads never replace the analysis. The game is kept while the
+  board is away (a notification, another app) and goes on when it is back.
+- **Fast enough for bullet**: the squares that changed, and the legal moves,
+  usually leave exactly one move (or a move and the reply that came with
+  it, a premove) that explains them, including the site's last-move
+  highlight going away and a check highlight. That move is analysed the
+  moment the board is still, within a few milliseconds and before the board
+  recognizer runs; the arrows come back as soon as the clean capture is
+  taken, and the recognizer then checks the move on it and corrects it if
+  it was wrong (logged). When no single move explains the change, the
+  recognizer decides, as before.
 - **Steady display**: engine lines are shown as whole iterations (every
-  line at one depth), from depth 8; below depth 18 a change of the arrows is
+  line at one depth), from depth 8 (shallower ones after 150 ms, so an
+  engine whose depth is capped by a strength limit is shown too); below depth 18 a change of the arrows is
   shown only when two iterations agree (an engine often switches for one
   iteration and back); the same position's updates reach the screen about
   twice a second; the card keeps its size from move to move, showing the

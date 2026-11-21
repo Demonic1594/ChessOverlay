@@ -54,6 +54,11 @@ import io.github.chessoverlay.vision.Recognizer
  * moving) is thrown away, so a piece in flight is never read. Misreads are
  * retried with a growing pause and never replace the analysis.
  *
+ * Before that capture, the squares that changed usually show the move on
+ * their own (BoardTracker.explainChange): the engine starts on it at once,
+ * the arrows come back as soon as the capture is taken, and the recognizer
+ * then checks the move on that capture (and corrects it if needed).
+ *
  * The windows get a new position at once; further engine results for the
  * same position at most every SAME_POSITION_MS, so the lines stay readable.
  */
@@ -394,7 +399,17 @@ class OverlayService : Service() {
     private fun read(auto: Boolean, checkCapture: Boolean = false) {
         val a = analyst ?: return
         busy = true
+        // The move from the changed squares alone, analysed before the capture.
+        val still = watcher.still
+        val fast = auto && checkCapture && still != null && try {
+            a.fastLook(still, watcher.stillCover)
+        } catch (e: Throwable) {
+            DebugLog.e(TAG, "move from the changed squares failed", e)
+            false
+        }
         cleanCapture(hideCard = !auto) { img ->
+            // Taken: the new position's arrows may show while the recognizer checks it.
+            if (fast) main.post { draw?.blank = false }
             guarded("analyse") {
                 val moved = img != null && checkCapture && !watcher.captureMatches(img, a.board)
                 val r = when {
@@ -407,6 +422,7 @@ class OverlayService : Service() {
                 if (r == null) {
                     // A piece started moving as we captured: look again once it stops.
                     DebugLog.i(TAG, "board moved during the capture; reading again")
+                    if (fast) a.dropFast()
                 } else {
                     lastRead = now
                     if (r == Look.NEW || r == Look.SAME) {
@@ -601,8 +617,8 @@ class OverlayService : Service() {
         private const val TAG = "Overlay"
 
         private const val SAME_POSITION_MS = 450L   // engine updates for one position: about 2 a second
-        private const val POLL_MS = 60L             // board check, overlay showing
-        private const val STILL_MS = 120L           // the board must not move for this long
+        private const val POLL_MS = 30L             // board check, overlay showing
+        private const val STILL_MS = 80L            // the board must not move for this long
         private const val MIN_CHANGED = 2           // a move changes at least two squares
         private const val FIND_MS = 1000L           // no board yet: look this often...
         private const val FIND_STILL_MS = 300L      // ...once the screen has been still this long

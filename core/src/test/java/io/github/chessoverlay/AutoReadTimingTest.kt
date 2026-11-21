@@ -17,7 +17,7 @@ import org.junit.Test
 /**
  * Auto mode against a simulated screen: pieces glide over several frames
  * (as on chess sites), the overlay draws arrows, and the screen is polled
- * every 60 ms. The board must be read only once pieces have stopped, soon
+ * every 30 ms (as the overlay does). The board must be read only once pieces have stopped, soon
  * after, and never in flight.
  */
 class AutoReadTimingTest {
@@ -76,7 +76,7 @@ class AutoReadTimingTest {
 
     private fun rec(b: Board) = Recognition(b.placement(), false, 0.99f, 0.99f, corners, 0)
 
-    /** Polls every 60 ms from `from` to `to`; returns the times READ was decided. */
+    /** Polls every 30 ms from `from` to `to`; returns the times READ was decided. */
     private fun poll(w: ChangeWatcher, t: BoardTracker, from: Long, to: Long, glides: List<Glide>,
                      arrow: List<Shape>? = null, cover: BoardTracker.Cover? = null): List<Long> {
         val reads = ArrayList<Long>()
@@ -85,7 +85,7 @@ class AutoReadTimingTest {
         while (now <= to) {
             val px = BoardTracker.sample(screen(now, glides, arrow), xs, ys, 0, 0)
             if (w.offer(now, px, t, cover, 0) == ChangeWatcher.Decision.READ) reads += now
-            now += 60
+            now += 30
         }
         return reads
     }
@@ -98,8 +98,10 @@ class AutoReadTimingTest {
         val reads = poll(w, t, 0, 1000, glides)
         assertTrue("no read", reads.isNotEmpty())
         val first = reads.first()
-        assertTrue("read at $first, before the piece stopped at 300 ms + 120", first >= 420)
-        assertTrue("read at $first: too slow", first <= 300 + 120 + 2 * 60)
+        assertTrue("read at $first, before the piece stopped at 300 ms + 80", first >= 380)
+        assertTrue("read at $first: too slow", first <= 300 + 80 + 2 * 30)
+        // The changed squares already show the move, before any recognizer.
+        assertEquals(listOf("e2e4"), t.explainChange(w.still!!, null))
         // A capture taken while the piece was still moving does not match the still board.
         assertFalse(w.captureMatches(screen(250, glides), t))
         assertTrue(w.captureMatches(screen(first + 30, glides), t))
@@ -122,15 +124,32 @@ class AutoReadTimingTest {
         assertEquals(emptyList<Long>(), poll(w, t, 0, 1500, glides, arrow, cover))
     }
 
+    @Test fun theArrowedMoveIsSeenThroughTheArrow() {
+        // The overlay suggests Nf3 and it is played: its squares are partly under the arrow.
+        val t = BoardTracker()
+        val w = ChangeWatcher()
+        val p = start.copy().also { it.play("e2e4"); it.play("e7e5") }
+        val glides = listOf(Glide(p, "g1f3", 100, 200))
+        t.accept(screen(0, glides), rec(p), null, strict = true)
+        val g = BoardGeom(corners, false)
+        val arrow = listOf(Shape.Poly(arrowOutline(listOf(g.centre(Board.squareOf("g1")), g.centre(Board.squareOf("f3"))),
+            g.sq * 0.17f, g.sq * 0.42f, g.sq * 0.27f), 0xE61F7AE6.toInt()))
+        val cover = ShapeCover(arrow, 2f)
+        val reads = poll(w, t, 0, 1000, glides, arrow, cover)
+        assertTrue("read after the knight landed at 300 ms: $reads", reads.isNotEmpty() && reads.first() >= 380)
+        assertEquals(listOf("g1f3"), t.explainChange(w.still!!, w.stillCover))
+    }
+
     @Test fun aQuickReplyIsWaitedForAndBothMovesAreFound() {
         val t = BoardTracker()
         val w = ChangeWatcher()
         val afterE4 = start.copy().also { it.play("e2e4") }
-        // Black replies 60 ms after White's piece lands: shorter than the stillness wait.
-        val glides = listOf(Glide(start, "e2e4", 100, 200), Glide(afterE4, "c7c5", 360, 200))
+        // Black replies 50 ms after White's piece lands: shorter than the stillness wait.
+        val glides = listOf(Glide(start, "e2e4", 100, 200), Glide(afterE4, "c7c5", 350, 200))
         t.accept(screen(0, glides), rec(start), null, strict = true)
         val reads = poll(w, t, 0, 1500, glides)
-        assertTrue("read at ${reads.firstOrNull()} before the reply landed at 560 ms", reads.first() >= 560 + 120)
+        assertTrue("read at ${reads.firstOrNull()} before the reply landed at 550 ms", reads.first() >= 550 + 80)
+        assertEquals("both moves seen at once", listOf("e2e4", "c7c5"), t.explainChange(w.still!!, null))
         val both = afterE4.copy().also { it.play("c7c5") }
         val r = t.accept(screen(reads.first() + 30, glides), rec(both), null, strict = true) as BoardTracker.Result.Position
         assertEquals("White to move again after both moves", true, r.whiteToMove)

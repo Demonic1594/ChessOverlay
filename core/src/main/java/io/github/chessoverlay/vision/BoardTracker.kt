@@ -20,6 +20,13 @@ import kotlin.math.max
  *   just played; a jump of several moves or a new game falls back to the
  *   colour that left squares, then to the side at the bottom. Two moves at
  *   once (a quick reply) are found too and keep the side to move.
+ * - Moves seen at once ([explainChange]): which squares changed, and the
+ *   legal moves, usually leave exactly one move (or a move and its reply)
+ *   that explains them. That is known within a millisecond of the board
+ *   coming to rest, without the recognizer, which then checks it ([accept]
+ *   compares against the position before, see [applyFast]).
+ * - The game is kept when the board leaves the screen for a while (a
+ *   notification, another app): [reset] with `keepGame`.
  */
 class BoardTracker {
     var corners: List<FloatArray>? = null
@@ -29,6 +36,9 @@ class BoardTracker {
     var board: Board? = null
         private set
     var whiteToMove = true
+        private set
+    /** The last move linked (UCI): sites highlight its squares. */
+    var lastMove: String? = null
         private set
     // Sample points (screen pixels) for the current corners, and their
     // colours in the last clean read: 64 squares x PER points, row-major from
@@ -57,8 +67,119 @@ class BoardTracker {
         data class Invalid(val reason: String) : Result()
     }
 
-    fun reset() {
-        corners = null; board = null; xs = null; ys = null; ref = null
+    /**
+     * Forget where the board is. `keepGame`: remember the position (the board
+     * left the screen, or the screen turned): when it is seen again, the game
+     * goes on from it, side to move and all.
+     */
+    fun reset(keepGame: Boolean = false) {
+        corners = null; xs = null; ys = null; ref = null; pendingFast = null
+        if (!keepGame) { board = null; lastMove = null }
+    }
+
+    // ---- moves seen at once -------------------------------------------------
+
+    private class Fast(val prev: Board, val prevWhite: Boolean, val prevLast: String?)
+    private var pendingFast: Fast? = null
+
+    /**
+     * The move (or a move and its reply) that explains which squares
+     * changed since the last clean read, if exactly one does; null leaves it
+     * to the recognizer. `now`: the colours at [points], `cover` as in
+     * [compare].
+     *
+     * A move must change its squares (the pieces differ; one may be hidden
+     * under the overlay's drawing), and every changed square must belong to
+     * it, to the last move (whose highlight goes away) or to a king (a check
+     * highlight). Promotions are left to the recognizer (which piece?).
+     */
+    fun explainChange(now: IntArray, cover: Cover?): List<String>? {
+        val b = board ?: return null
+        val x = xs ?: return null
+        val y = ys ?: return null
+        val r = ref ?: return null
+        if (now.size != r.size) return null
+        val state = squareStates(r, now, x, y, cover)
+        val changed = BooleanArray(64)
+        val blind = BooleanArray(64)
+        for (sq in 0 until 64) when (state[PositionDecoder.drawnIndex(sq, blackAtBottom)]) {
+            CHANGED -> changed[sq] = true
+            BLIND -> blind[sq] = true
+        }
+        val nChanged = changed.count { it }
+        if (nChanged == 0 || nChanged > MAX_FAST_CHANGED) return null
+        val extra = BooleanArray(64)
+        lastMove?.let { m -> extra[Board.squareOf(m.substring(0, 2))] = true; extra[Board.squareOf(m.substring(2, 4))] = true }
+        b.kingSquare(true).takeIf { it >= 0 }?.let { extra[it] = true }
+        b.kingSquare(false).takeIf { it >= 0 }?.let { extra[it] = true }
+
+        fun fits(after: Board, last: String): Boolean {
+            var blindDiff = 0
+            var seenDiff = 0
+            val allowed = extra.copyOf()
+            allowed[Board.squareOf(last.substring(0, 2))] = true
+            allowed[Board.squareOf(last.substring(2, 4))] = true
+            for (sq in 0 until 64) {
+                if (b[sq] == after[sq]) continue
+                allowed[sq] = true
+                when {
+                    changed[sq] -> seenDiff++
+                    blind[sq] -> blindDiff++
+                    else -> return false   // a piece changed here, but the square looks the same
+                }
+            }
+            if (seenDiff == 0 || blindDiff > 1) return false
+            for (sq in 0 until 64) if (changed[sq] && !allowed[sq]) return false
+            return true
+        }
+
+        val white = whiteToMove
+        val moves = b.legalMoves(white)
+        val singles = moves.filter { m -> fits(b.copy().also { it.play(m) }, m) }
+        if (singles.isNotEmpty()) {
+            val m = singles.singleOrNull() ?: return null
+            return if (m.length > 4) null else listOf(m)
+        }
+        // A quick reply (a premove): one move each.
+        val finals = HashMap<String, List<String>>()
+        for (m in moves) {
+            val f = Board.squareOf(m.substring(0, 2))
+            if (!changed[f] && !blind[f]) continue
+            val one = b.copy().also { it.play(m) }
+            for (reply in one.legalMoves(!white)) {
+                val rf = Board.squareOf(reply.substring(0, 2))
+                if (!changed[rf] && !blind[rf]) continue
+                val two = one.copy().also { it.play(reply) }
+                if (fits(two, reply)) finals[two.placement()] = listOf(m, reply)
+                if (finals.size > 1) return null
+            }
+        }
+        val pair = finals.values.singleOrNull() ?: return null
+        return if (pair.any { it.length > 4 }) null else pair
+    }
+
+    /**
+     * Take moves found by [explainChange] as the new position now; the next
+     * [accept] (the recognizer's reading of the clean capture) is judged from
+     * the position before them, so a wrong guess is put right.
+     */
+    fun applyFast(moves: List<String>): Result.Position {
+        val prev = board ?: throw IllegalStateException("no game")
+        val prevWhite = whiteToMove
+        pendingFast = Fast(prev, prevWhite, lastMove)
+        val b = prev.copy()
+        for (m in moves) b.play(m)
+        board = b
+        whiteToMove = if (moves.size == 2) prevWhite else !prevWhite
+        lastMove = moves.last()
+        return Result.Position(b, whiteToMove, moves.singleOrNull(), prev, prevWhite)
+    }
+
+    /** Drop the moves of [applyFast] without a reading (the capture was thrown away). */
+    fun abandonFast() {
+        val f = pendingFast ?: return
+        pendingFast = null
+        board = f.prev; whiteToMove = f.prevWhite; lastMove = f.prevLast
     }
 
     /** The board's bounding box on screen (x0, y0, x1, y1), or null. */
@@ -114,6 +235,7 @@ class BoardTracker {
      * that, the plain reading, turned the way Orientation decides.
      */
     fun accept(img: Img, rec: Recognition, sideOverride: Boolean?, strict: Boolean = false): Result {
+        abandonFast()   // judge the reading from the position before any move seen at once
         val prev = board
         val prevWhite = whiteToMove
         val decoded = if (prev != null) PositionDecoder.decode(prev, prevWhite, blackAtBottom, rec,
@@ -151,7 +273,8 @@ class BoardTracker {
             move != null -> !b[Board.squareOf(move.substring(2, 4))].isUpperCase()
             moves != null && moves.size == 2 -> prevWhite
             b.placement() == START -> true   // a new game: White begins, whichever side is at the bottom
-            prev != null -> Board.mover(prev, b)?.let { !it } ?: !black
+            // A small change is the rest of a move or two; a big one is another game.
+            prev != null && (0..63).count { prev[it] != b[it] } <= 8 -> Board.mover(prev, b)?.let { !it } ?: !black
             else -> !black
         }
         // A position no game can reach is a misread (a piece caught mid-move):
@@ -165,6 +288,7 @@ class BoardTracker {
         if (sameBoard && white == prevWhite) return Result.Same
         board = b
         whiteToMove = white
+        lastMove = moves?.lastOrNull()
         return Result.Position(b, white, move, prev, prevWhite)
     }
 
@@ -212,8 +336,17 @@ class BoardTracker {
          * least MIN_POINTS uncovered points).
          */
         fun compare(a: IntArray, b: IntArray, xs: IntArray, ys: IntArray, cover: Cover?): Comparison {
-            var changed = 0
-            var blind = 0
+            val st = squareStates(a, b, xs, ys, cover)
+            return Comparison(st.count { it == CHANGED }, st.count { it == BLIND })
+        }
+
+        const val SAME = 0
+        const val CHANGED = 1
+        const val BLIND = 2
+
+        /** Per drawn square (row-major from the top-left): SAME, CHANGED or BLIND (too few uncovered points). */
+        fun squareStates(a: IntArray, b: IntArray, xs: IntArray, ys: IntArray, cover: Cover?): IntArray {
+            val out = IntArray(64)
             for (sq in 0 until 64) {
                 var n = 0
                 var total = 0
@@ -224,10 +357,13 @@ class BoardTracker {
                     total += colourDistance(a[i], b[i])
                     n++
                 }
-                if (n < MIN_POINTS) blind++ else if (total > THRESHOLD * n) changed++
+                out[sq] = if (n < MIN_POINTS) BLIND else if (total > THRESHOLD * n) CHANGED else SAME
             }
-            return Comparison(changed, blind)
+            return out
         }
+
+        /** More changed squares than this is not a move or two (a dialog, a scroll). */
+        private const val MAX_FAST_CHANGED = 12
 
         private fun colourDistance(a: Int, b: Int): Int = max(
             abs(((a shr 16) and 0xff) - ((b shr 16) and 0xff)),

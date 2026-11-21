@@ -15,7 +15,7 @@ package io.github.chessoverlay.vision
  *   between, the capture is thrown away.
  */
 class ChangeWatcher(
-    private val stillMs: Long = 120,
+    private val stillMs: Long = 80,
     private val minChanged: Int = 2,
     private val blindMs: Long = 20_000,
 ) {
