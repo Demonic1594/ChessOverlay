@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A board corner (cream and green) and the best-move arrow, inside the adaptive icon's safe circle. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#EBECD0" android:pathData="M32,52h12v12H32zM44,64h12v12H44z" />
+    <path android:fillColor="#739552" android:pathData="M44,52h12v12H44zM32,64h12v12H32z" />
+    <path android:fillColor="#3B8BEB" android:strokeColor="#0F1113" android:strokeWidth="1.5"
+        android:pathData="M36.5,76.5 L66.6,46.4 L70.1,49.9 L74,34 L58.1,37.9 L61.6,41.4 L31.5,71.5 Z" />
+</vector>

@@ -1,0 +1,311 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/scroll"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:id="@+id/content"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="16dp"
+        android:paddingTop="20dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="32dp">
+
+        <!-- Header -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:contentDescription="@null"
+                android:src="@mipmap/ic_launcher" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="ChessOverlay"
+                    android:textColor="@color/text"
+                    android:textSize="24sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    style="@style/Caption"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Engine analysis over any chess app" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Setup checklist and the start button -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:id="@+id/checks"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+
+                <com.google.android.material.progressindicator.LinearProgressIndicator
+                    android:id="@+id/modelProgress"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:visibility="gone"
+                    app:trackCornerRadius="2dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/start"
+                    android:layout_width="match_parent"
+                    android:layout_height="60dp"
+                    android:layout_marginTop="14dp"
+                    android:text="Start overlay"
+                    android:textSize="17sp"
+                    app:cornerRadius="16dp"
+                    app:icon="@drawable/ic_play"
+                    app:iconGravity="textStart" />
+
+                <TextView
+                    android:id="@+id/startHint"
+                    style="@style/Caption"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Engine -->
+        <TextView
+            style="@style/Section"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Engine" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <ImageView
+                        android:layout_width="28dp"
+                        android:layout_height="28dp"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_engine"
+                        app:tint="@color/accent" />
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="12dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/engineName"
+                            style="@style/Title"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="…"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/engineKind"
+                            style="@style/Caption"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:baselineAligned="false"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/engineChange"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        app:iconPadding="6dp"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:layout_weight="1"
+                        android:maxLines="1"
+                        android:text="Change"
+                        app:icon="@drawable/ic_swap" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/engineOptions"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        app:iconPadding="6dp"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:maxLines="1"
+                        android:text="Options"
+                        app:icon="@drawable/ic_tune" />
+                </LinearLayout>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/engineAdd"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Add an engine file"
+                    app:icon="@drawable/ic_add" />
+
+                <TextView
+                    style="@style/Caption"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="Built in: Smotherfish. Also found: engine apps that offer engines to chess GUIs (Open Exchange, as DroidFish uses). An engine file: any arm64 UCI engine (Stockfish, Komodo, lc0 with a Maia network…)." />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <TextView
+            style="@style/Section"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Analysis" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <LinearLayout
+                android:id="@+id/analysis"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </com.google.android.material.card.MaterialCardView>
+
+        <TextView
+            style="@style/Section"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="On the board" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <io.github.chessoverlay.ui.PreviewBoardView
+                    android:id="@+id/preview"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="6dp" />
+
+                <TextView
+                    style="@style/Caption"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="Preview with your settings: the best move in bold blue, other lines thinner, the best line's next moves numbered per side." />
+
+                <LinearLayout
+                    android:id="@+id/boardSettings"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <TextView
+            style="@style/Section"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Floating card" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <LinearLayout
+                android:id="@+id/cardSettings"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </com.google.android.material.card.MaterialCardView>
+
+        <TextView
+            style="@style/Section"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Help and debug" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <LinearLayout
+                android:id="@+id/debug"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </com.google.android.material.card.MaterialCardView>
+
+        <TextView
+            style="@style/Caption"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="24dp"
+            android:layout_marginEnd="4dp"
+            android:text="Fair play: using engine help in live games against people is cheating. Chess sites detect it and ban accounts. How you use this app, and what follows from it, is your responsibility." />
+
+        <TextView
+            android:id="@+id/version"
+            style="@style/Caption"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:gravity="center" />
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>
