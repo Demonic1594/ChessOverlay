@@ -70,12 +70,18 @@ class Analyst(
         val depth: Int,
         /** The engine's best line in short algebraic notation, with the game's move numbers. */
         val line: String,
+        /** The same line as UCI moves, to draw it; the evaluation from White's view (centipawns, or moves to a mate). */
+        val pv: List<String> = emptyList(),
+        val whiteCp: Int? = null,
+        val whiteMate: Int? = null,
+        /** The line is what the engine expected of this position, from its line for the one before. */
+        val expected: Boolean = false,
     ) {
         val side: String get() = if (whiteToMove) "White to move" else "Black to move"
 
         /** One line, for a list or a note: "move 12 · White to move · eval +0.4 · depth 24". */
-        fun summary(): String =
-            listOfNotNull(moveNumber?.let { "move $it" }, side, score?.let { "eval $it" }, if (depth > 0) "depth $depth" else null).joinToString(" · ")
+        fun summary(): String = listOfNotNull(moveNumber?.let { "move $it" }, side, if (expected) "expected" else null,
+            score?.let { "eval $it" }, if (depth > 0) "depth $depth" else null).joinToString(" · ")
 
         /** For a message: the summary, the line and the FEN. */
         fun text(): String = summary() + (if (line.isNotEmpty()) "\n$line" else "") + "\n$fen"
@@ -86,8 +92,11 @@ class Analyst(
         val s = state
         val b = s.board ?: return@synchronized null
         val top = s.lines.firstOrNull()
-        Position(b.fen(s.whiteToMove), s.whiteToMove, s.moveNumber, top?.let { CardLayer.shortScore(it, s.whiteToMove) },
-            top?.depth ?: 0, top?.let { b.lineText(it.pv, s.whiteToMove, 8, s.moveNumber ?: 1) } ?: "")
+        val white = s.whiteToMove
+        fun white(i: Int?) = i?.let { if (white) it else -it }
+        Position(b.fen(white), white, s.moveNumber, top?.let { CardLayer.shortScore(it, white) },
+            top?.depth ?: 0, top?.let { b.lineText(it.pv, white, 8, s.moveNumber ?: 1) } ?: "",
+            top?.pv ?: emptyList(), white(top?.scoreCp), white(top?.mate), s.provisional)
     }
 
     /** Engine results, from the engine thread. */

@@ -114,6 +114,18 @@ class Rows(private val parent: LinearLayout) {
         return field
     }
 
+    /** Takes every row out (the rows are built again). */
+    fun clear() = parent.removeAllViews()
+
+    /** A heading inside a card, above some of its rows. */
+    fun subhead(text: String) {
+        parent.addView(TextView(ctx, null, 0, R.style.Caption).apply {
+            this.text = text
+            setPadding(ctx.dp(4f), ctx.dp(10f), ctx.dp(4f), 0)
+            letterSpacing = 0.06f
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+    }
+
     /** A row of buttons of equal width (`labels` short: one line each). */
     fun buttons(labels: List<String>, onClick: (Int) -> Unit) {
         val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
@@ -130,6 +142,27 @@ class Rows(private val parent: LinearLayout) {
             row.addView(button)
         }
         parent.addView(row)
+    }
+
+    /** What something needs: done (a tick), to do (a warning sign; tapping it does what is needed) or busy. */
+    class Status(val label: String, val done: Boolean, val busy: Boolean = false, val onClick: (() -> Unit)? = null)
+
+    /** The needs of the overlay as chips in a row. */
+    fun statusChips(items: List<Status>) {
+        for ((i, s) in items.withIndex()) {
+            val chip = Chip(ctx, null, R.attr.statusChipStyle).apply {
+                text = s.label
+                isChipIconVisible = !s.busy
+                chipIcon = ContextCompat.getDrawable(ctx, if (s.done) R.drawable.ic_check else R.drawable.ic_warn)
+                chipIconTint = android.content.res.ColorStateList.valueOf(
+                    ContextCompat.getColor(ctx, if (s.done) R.color.good else R.color.warn))
+                isClickable = s.onClick != null
+                s.onClick?.let { action -> setOnClickListener { action() } }
+            }
+            parent.addView(chip, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                if (i > 0) marginStart = ctx.dp(6f)
+            })
+        }
     }
 
     fun check(icon: Int, title: String): CheckRow {

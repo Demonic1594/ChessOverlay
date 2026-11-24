@@ -94,6 +94,10 @@ dependencies {
     testImplementation("com.microsoft.onnxruntime:onnxruntime:1.20.0")
 }
 
+// The benchmark of board reading (tools/bench, BenchTest) keeps its pictures
+// in memory: 200 of them, most the size of a phone screen.
+tasks.withType<Test>().configureEach { maxHeapSize = "3g" }
+
 // The Android ONNX Runtime has the same classes as the desktop one; keep it
 // off the JVM unit-test classpath.
 configurations.matching { it.name.endsWith("UnitTestRuntimeClasspath") }.configureEach {
