@@ -139,11 +139,12 @@ Run 45437232123 (24 November 2026, x86 CI runner):
 |---|---|---|
 | As the locator gives them | 179 / 200 | 49 / 200 |
 | Located and refined, as the app reads | 197 / 200 | 198 / 200 |
+| Original model, located and refined | 197 / 200 | 198 / 200 |
 | Exact | 199 / 200 | |
 | Off by up to 1 % of a side | 199 / 200 | |
 | Off by up to 2.5 % of a side | 199 / 200 | |
 
-A read took 106 ms (median) with the locator's corners and with them refined. Of the three boards still read wrong with refined corners, one is a position of kings and pawns whose orientation the model gets wrong at exact corners too, and on two the locator returned a tilted box for a board that stands square.
+A read took 106 ms (median) with the locator's corners and with them refined. The original model, which the APK does not carry, reads the same boards and takes 122 ms. Of the three boards still read wrong with refined corners, one is a position of kings and pawns whose orientation the model gets wrong at exact corners too, and on two the locator returned a tilted box for a board that stands square.
 
 The test fails when fewer than half the boards are read right with refined corners, so a change that breaks recognition cannot pass unnoticed.
 
