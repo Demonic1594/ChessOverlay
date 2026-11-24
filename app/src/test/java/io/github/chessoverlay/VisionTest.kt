@@ -48,7 +48,9 @@ class VisionTest {
         Recognizer(File(dir, "board.onnx"), File(dir, "locator.onnx"), RecognizerMode(RecognizerMode.CPU, 4)).use { rec ->
             for (name in expected.keys()) {
                 val e = expected.getJSONObject(name)
-                val r = rec.recognise(load("$name.png"))
+                // The port of chessimg2pos: with the corners as its locator gives them. (BoardEdges sharpens a
+                // located board after that; BoardEdgesScreensTest says where the board really is on two of these.)
+                val r = rec.recognise(load("$name.png"), sharpen = false)
                 val fen = if (r.blackAtBottom) "black" else "white"
                 println("$name: ${r.placement} $fen conf=${"%.3f".format(r.confidence)} corners=${r.corners.map { c -> c.map { it.toInt() } }}")
                 assertEquals(name, e.getString("fen"), r.placement)
