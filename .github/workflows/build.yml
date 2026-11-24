@@ -74,9 +74,17 @@ jobs:
           /tmp/quant/bin/pip install --quiet "onnxruntime==1.20.1" "onnx==1.17.0"
           /tmp/quant/bin/python tools/quantize_models.py models app/src/main/assets/models
 
+      # The benchmark of board reading: boards as lichess shows them, rendered
+      # with Chrome (BenchTest reads the directory; its table is uploaded).
+      - name: Benchmark boards
+        run: |
+          python3 -m venv /tmp/bench
+          /tmp/bench/bin/pip install --quiet "chess==1.11.2"
+          /tmp/bench/bin/python tools/bench/gen.py "$GITHUB_WORKSPACE/build/bench" --boards 200
+
       - name: Unit tests
         run: |
-          MODELS="$GITHUB_WORKSPACE/models" QMODELS="$GITHUB_WORKSPACE/app/src/main/assets/models" \
+          MODELS="$GITHUB_WORKSPACE/models" QMODELS="$GITHUB_WORKSPACE/app/src/main/assets/models" BENCH="$GITHUB_WORKSPACE/build/bench" \
             ./gradlew --no-daemon :core:test testDebugUnitTest
 
       # The engine comes after the tests: a change in the Kotlin shows in the
@@ -150,6 +158,14 @@ jobs:
           name: overlay-previews
           path: core/build/preview/
           retention-days: 14
+
+      # What the benchmark of board reading said (BenchTest's table).
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-report
+          path: build/bench/report.txt
+          retention-days: 30
 
       # What Gradle puts on the app's classpaths (all of its configurations),
       # so that the Kotlin can be compiled where the Android Gradle plugin
