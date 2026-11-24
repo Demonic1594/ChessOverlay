@@ -151,6 +151,19 @@ jobs:
           path: core/build/preview/
           retention-days: 14
 
+      # What Gradle puts on the app's classpaths (all of its configurations),
+      # so that the Kotlin can be compiled where the Android Gradle plugin
+      # cannot run: tools/compile.py reads the three that matter in it.
+      - name: The compile classpath
+        run: ./gradlew --no-daemon -q :app:dependencies > classpath.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compile-classpath
+          path: classpath.txt
+          retention-days: 30
+
   # The engine from the APK on real arm64 hardware (Linux, not Android, but
   # the same static binary), run by the app's own engine code with 4 threads
   # as on a phone: an engine that is silent on ARM shows up here.
