@@ -184,6 +184,19 @@ class LineStabilizerTest {
         assertNull(s.pendingChange())
     }
 
+    @Test fun itGivesBackTheEnginesOwnLinesOrTheOnesShownBefore() {
+        // The overlay tells the two apart by the list itself: what the engine expected of a position is shown
+        // dimmed until its own lines come, and only its own (the list it hands over) end that.
+        val s = io.github.chessoverlay.engine.LineStabilizer(arrows = 2, pathPlies = 2)
+        val first = lines(8, "e2e4", "d2d4")
+        org.junit.Assert.assertSame(first, s.offer(first, false))
+        org.junit.Assert.assertSame("a change waits: the lines shown before", first, s.offer(lines(9, "d2d4", "e2e4"), false))
+        val agreed = lines(10, "d2d4", "e2e4")
+        org.junit.Assert.assertSame(agreed, s.offer(agreed, false))
+        val last = lines(22, "g1f3", "d2d4")
+        org.junit.Assert.assertSame("the search ends: what it ended on", last, s.offer(last, true))
+    }
+
     @Test fun aChangeIsShownWhenItHasWaitedLongEnough() {
         val s = io.github.chessoverlay.engine.LineStabilizer(arrows = 2, pathPlies = 2)
         s.offer(lines(17, "e2e4", "d2d4"), false, now = 0)

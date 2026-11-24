@@ -156,11 +156,15 @@ class Analyst(
                 pendingAt = since
                 val id = u.id
                 timer.schedule({
-                    synchronized(lock) { if (id == requestId) stabilizer.expired()?.let { late -> publish(state.copy(lines = late)) } }
+                    // The change is the engine's own line: shown as it is, no longer as what it expected.
+                    synchronized(lock) { if (id == requestId) stabilizer.expired()?.let { late -> publish(state.copy(lines = late, provisional = false)) } }
                 }, (since + stabilizer.maxPendingMs - now).coerceAtLeast(0), TimeUnit.MILLISECONDS)
             }
         }
-        publish(s.copy(status = status, searching = !u.finished, lines = shown, lastMove = mark))
+        // The engine's own lines (shown === u.lines) are no longer what it expected of the position, which
+        // was shown dimmed until they came; while a change of them waits, the lines shown before stay as they were.
+        publish(s.copy(status = status, searching = !u.finished, lines = shown, lastMove = mark,
+            provisional = s.provisional && shown !== u.lines))
     }
 
     /** The game on screen; read it only from the thread that calls look(). */
