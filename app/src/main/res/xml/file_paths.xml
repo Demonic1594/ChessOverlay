@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Shared from the Debug section: the last screen a read failed on. -->
+    <files-path name="debug" path="debug/" />
+</paths>
