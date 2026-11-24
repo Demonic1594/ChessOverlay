@@ -46,27 +46,6 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Android NDK
-        run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION" > /dev/null
-          echo "NDK_BIN=$ANDROID_HOME/ndk/$NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_ENV"
-
-      - name: Build Smotherfish (arm64, static)
-        run: |
-          git init -q engine
-          git -C engine remote add origin https://github.com/Demonic1594/Smotherfish.git
-          git -C engine fetch -q --depth 1 origin "$ENGINE_REF"
-          git -C engine checkout -q FETCH_HEAD
-          cd engine/src
-          make -j"$(nproc)" net
-          PATH="$NDK_BIN:$PATH" make -j"$(nproc)" build ARCH=armv8 COMP=ndk EXTRALDFLAGS="-static" > ../build.log 2>&1 \
-            || { tail -40 ../build.log; exit 1; }
-          "$NDK_BIN/llvm-strip" stockfish
-          file stockfish
-          mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a"
-          cp stockfish "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libsmotherfish.so"
-          echo "Bundled Smotherfish $(git -C .. rev-parse --short HEAD) ($ENGINE_REF)"
-
       - name: Recognition models (cached)
         uses: actions/cache@v4
         with:
@@ -99,6 +78,29 @@ jobs:
         run: |
           MODELS="$GITHUB_WORKSPACE/models" QMODELS="$GITHUB_WORKSPACE/app/src/main/assets/models" \
             ./gradlew --no-daemon :core:test testDebugUnitTest
+
+      # The engine comes after the tests: a change in the Kotlin shows in the
+       # tests a few minutes sooner, and they do not need it.
+      - name: Android NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION" > /dev/null
+          echo "NDK_BIN=$ANDROID_HOME/ndk/$NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_ENV"
+
+      - name: Build Smotherfish (arm64, static)
+        run: |
+          git init -q engine
+          git -C engine remote add origin https://github.com/Demonic1594/Smotherfish.git
+          git -C engine fetch -q --depth 1 origin "$ENGINE_REF"
+          git -C engine checkout -q FETCH_HEAD
+          cd engine/src
+          make -j"$(nproc)" net
+          PATH="$NDK_BIN:$PATH" make -j"$(nproc)" build ARCH=armv8 COMP=ndk EXTRALDFLAGS="-static" > ../build.log 2>&1 \
+            || { tail -40 ../build.log; exit 1; }
+          "$NDK_BIN/llvm-strip" stockfish
+          file stockfish
+          mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a"
+          cp stockfish "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libsmotherfish.so"
+          echo "Bundled Smotherfish $(git -C .. rev-parse --short HEAD) ($ENGINE_REF)"
 
       # The project's signing key, for the APKs meant for installing (pushes
       # to main, runs by hand). Not for pull requests: their code could print

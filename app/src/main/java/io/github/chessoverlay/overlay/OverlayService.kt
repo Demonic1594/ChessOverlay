@@ -428,8 +428,10 @@ class OverlayService : Service() {
                     if (r == Look.NEW || r == Look.SAME) {
                         misses = 0; retryAt = 0L
                     } else if (auto) {
-                        // Keep what the recognizer saw when it keeps failing, to share from the app.
-                        if (misses >= 1 && img != null) DebugCapture.save(this@OverlayService, img, "$r")
+                        // Keep the screen when a board is read wrongly time and again, to
+                        // share from the app. Not when there is no board: that is any
+                        // other screen the user went to.
+                        if (misses >= 1 && img != null && r != Look.NO_BOARD) DebugCapture.save(this@OverlayService, img, "$r")
                         // A misread or no board: try again soon, then less often.
                         misses = minOf(misses + 1, 5)
                         retryAt = now + (RETRY_MS shl (misses - 1))

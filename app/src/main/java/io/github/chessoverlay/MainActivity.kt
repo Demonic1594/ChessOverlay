@@ -1,10 +1,13 @@
 package io.github.chessoverlay
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.provider.Settings
@@ -12,6 +15,7 @@ import android.view.View
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.google.android.material.button.MaterialButton
@@ -83,6 +87,12 @@ class MainActivity : AppCompatActivity() {
 
         val version = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Exception) { "" }
         findViewById<TextView>(R.id.version).text = "ChessOverlay $version"
+        // The overlay runs as a foreground service and needs its notification;
+        // Android 13 asks for that permission separately.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIFICATIONS)
+        }
         loadEngines()
     }
 
@@ -329,5 +339,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val REQ_CAPTURE = 1
         private const val REQ_IMPORT = 2
+        private const val REQ_NOTIFICATIONS = 3
     }
 }
