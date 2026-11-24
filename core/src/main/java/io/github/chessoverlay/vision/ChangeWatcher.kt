@@ -15,7 +15,8 @@ package io.github.chessoverlay.vision
  *   between, the capture is thrown away.
  */
 class ChangeWatcher(
-    private val stillMs: Long = 80,
+    /** How still the board must be before a read; less in a fast game (the overlay sets it). */
+    var stillMs: Long = 80,
     private val minChanged: Int = 2,
     private val blindMs: Long = 20_000,
 ) {

@@ -72,7 +72,8 @@ object CardLayer {
         val hits = ArrayList<CardHit>()
         // What to show: this position's lines, or the last ones faded.
         val shownState = if (s.lines.isEmpty() && ghost != null && ghost.lines.isNotEmpty()) ghost else s
-        val faded = shownState !== s
+        // Faded: the last position's lines, or what the engine only expected of this one.
+        val faded = shownState !== s || s.provisional
         val top = shownState.lines.firstOrNull()
         fun c(color: Int) = if (faded) fade(color) else color
 

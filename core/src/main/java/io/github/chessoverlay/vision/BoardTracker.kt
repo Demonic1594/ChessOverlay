@@ -39,7 +39,7 @@ import kotlin.math.max
  * - The game is kept when the board leaves the screen for a while (a
  *   notification, another app): [reset] with `keepGame`.
  */
-class BoardTracker {
+class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
     var corners: List<FloatArray>? = null
         private set
     var blackAtBottom = false
@@ -66,9 +66,24 @@ class BoardTracker {
         private set
     /** The number of the move to be played (1 at the start), when [ply] is known; else null. */
     val moveNumber: Int? get() = ply?.let { it / 2 + 1 }
+    /**
+     * The time between the last moves (the median of them) when four moves
+     * were timed at least; else null. A step back, a jump or another game
+     * starts the timing again.
+     */
+    fun paceMs(): Long? {
+        if (moveTimes.size < 4) return null
+        val gaps = (1 until moveTimes.size).map { moveTimes[it] - moveTimes[it - 1] }.sorted()
+        return gaps[gaps.size / 2]
+    }
+
+    /** A game whose moves come less than [FAST_PACE_MS] apart of late: the overlay reads and shows faster then. */
+    fun fastGame(): Boolean = paceMs()?.let { it <= FAST_PACE_MS } ?: false
     /** How many times the current position came up in the game, itself included. */
     var repetitions = 1
         private set
+    /** When the last moves were played (`clock`), to tell a fast game. */
+    private val moveTimes = ArrayDeque<Long>()
     // Sample points (screen pixels) for the current corners, and their
     // colours in the last clean read: 64 squares x PER points, row-major from
     // the top-left square as drawn.
@@ -107,6 +122,7 @@ class BoardTracker {
         if (!keepGame) {
             board = null; lastMove = null
             history.clear(); sideKnown = false; ply = null; repetitions = 1
+            moveTimes.clear()
         }
     }
 
@@ -363,8 +379,10 @@ class BoardTracker {
         } else {
             if (seen != null) {
                 history.subList(at, history.size).clear()   // the line goes on from here
+                moveTimes.clear()   // the times of a line that is not played now say nothing
             } else if (b.placement() == START && playedMoves == null) {
                 history.clear()   // another game, or the game seen from its start
+                moveTimes.clear()
             } else if (prev != null) {
                 history.add(Seen(prev, prev.placement(), prevWhite, lastMove, oldKnown, oldPly))
                 while (history.size > MAX_HISTORY) history.removeAt(0)
@@ -376,6 +394,10 @@ class BoardTracker {
                 else -> { ply = null; sideKnown = known }
             }
             repetitions = 1 + history.count { it.board.samePosition(b, white) }
+            if (playedMoves != null) {
+                moveTimes.addLast(clock())
+                while (moveTimes.size > MOVE_TIMES) moveTimes.removeFirst()
+            }
         }
         board = b
         whiteToMove = white
@@ -394,6 +416,12 @@ class BoardTracker {
 
         /** Positions kept of the line followed (a game has a few hundred at most). */
         private const val MAX_HISTORY = 1024
+        /** Moves timed to tell the pace of a game. */
+        private const val MOVE_TIMES = 7
+
+        /** Moves less than this apart of late make a fast game (bullet; the last seconds of one). */
+        const val FAST_PACE_MS = 1500L
+
 
         /** Points per square side: 7 x 7 over the inner 70% of each square. */
         private const val SAMPLES = 7

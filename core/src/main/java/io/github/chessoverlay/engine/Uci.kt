@@ -161,32 +161,49 @@ class PvCollector(private val expected: Int) {
 }
 
 /**
- * Keeps arrows from jumping back and forth. At low depths an engine often
- * switches its best move for one iteration and then switches back; showing
- * each switch makes the arrows flicker. A change of the arrows' moves (the
- * first move of each line with an arrow, and the best line's next moves) is
- * shown once two iterations in a row agree on it, or at once from depth
- * DEEP (iterations are slow there, and a change means something). Scores
- * and depth move with the lines they belong to.
+ * Keeps arrows from jumping back and forth. An engine often switches its
+ * best move for one iteration and then switches back; showing each switch
+ * makes the arrows flicker. A change of the arrows (the first move of each
+ * line with an arrow, and the best line's next moves) is shown once two
+ * iterations in a row agree on it, or when it has waited [maxPendingMs]
+ * ([expired]: iterations grow long at depth, and a change that stays must
+ * reach the screen). Scores and depth move with the lines they belong to.
  */
-class LineStabilizer(private val arrows: Int, private val pathPlies: Int) {
+class LineStabilizer(private val arrows: Int, private val pathPlies: Int, val maxPendingMs: Long = MAX_PENDING_MS) {
     private var shown: List<PvLine>? = null
+    private var pending: List<PvLine>? = null
     private var pendingKey: String? = null
+    private var pendingSince = 0L
 
-    fun reset() { shown = null; pendingKey = null }
+    fun reset() { shown = null; pending = null; pendingKey = null }
 
-    /** The lines to show for this iteration (the last shown ones, while a change is unconfirmed). */
-    fun offer(lines: List<PvLine>, finished: Boolean): List<PvLine> {
+    /** The lines to show for this iteration: the last shown ones while a change is unconfirmed. */
+    fun offer(lines: List<PvLine>, finished: Boolean, now: Long = System.currentTimeMillis()): List<PvLine> {
         val cur = shown
         val key = key(lines)
-        val depth = lines.firstOrNull()?.depth ?: 0
-        if (cur == null || key == key(cur) || finished || depth >= DEEP || key == pendingKey) {
+        if (cur == null || key == key(cur) || finished || key == pendingKey) {
             shown = lines
+            pending = null
             pendingKey = null
             return lines
         }
+        pending = lines
         pendingKey = key
+        pendingSince = now
         return cur
+    }
+
+    /** The change that waits for a second iteration, and since when; null when none does. */
+    fun pendingChange(): Pair<Long, List<PvLine>>? = pending?.let { pendingSince to it }
+
+    /** Shows the waiting change if it has waited [maxPendingMs], and returns it; null when it has not, or none waits. */
+    fun expired(now: Long = System.currentTimeMillis()): List<PvLine>? {
+        val p = pending ?: return null
+        if (now - pendingSince < maxPendingMs) return null
+        shown = p
+        pending = null
+        pendingKey = null
+        return p
     }
 
     private fun key(lines: List<PvLine>): String {
@@ -198,7 +215,23 @@ class LineStabilizer(private val arrows: Int, private val pathPlies: Int) {
     }
 
     companion object {
-        const val DEEP = 18
+        /** How long a change may wait for a second iteration that agrees. */
+        const val MAX_PENDING_MS = 700L
+    }
+}
+
+/** What the engine expected of the position after a move: from its lines for the position before. */
+object Continuation {
+    /**
+     * The line for the position after `move` as far as the engine had looked:
+     * the line of `lines` (for the position before, the mover to move) that
+     * began with `move`, without its first move and with its score turned
+     * round for the other side. Null when no line began with it, or when it
+     * has no move left.
+     */
+    fun after(lines: List<PvLine>, move: String): PvLine? {
+        val l = lines.firstOrNull { it.pv.firstOrNull() == move && it.pv.size > 1 } ?: return null
+        return PvLine(1, l.depth, l.scoreCp?.let { -it }, l.mate?.let { -it }, l.pv.drop(1), l.nodes, l.wdl)
     }
 }
 
@@ -210,7 +243,7 @@ class LineStabilizer(private val arrows: Int, private val pathPlies: Int) {
  * capped (a strength limit such as UCI_LimitStrength with a low Elo) may
  * never go deeper than depth 1.
  */
-class FirstLinesGate<T>(private val minDepth: Int, private val waitMs: Long) {
+class FirstLinesGate<T>(var minDepth: Int, var waitMs: Long) {
     private var startedAt = 0L
     private var shown = false
     private var held: T? = null

@@ -255,6 +255,26 @@ class CardLayoutTest {
     }
 
     @Test
+    fun whatTheEngineExpectedIsDrawnDimmed() {
+        val plain = state.copy(lines = listOf(io.github.chessoverlay.engine.PvLine(1, 20, 30, null, listOf("f1b5", "a7a6", "b5a4"))))
+        val expected = plain.copy(provisional = true)
+        fun fills(s: io.github.chessoverlay.overlay.OverlayState) =
+            io.github.chessoverlay.overlay.BoardLayer.build(s, io.github.chessoverlay.overlay.BoardStyle(arrows = 2, pathPlies = 2), m)
+                .filterIsInstance<io.github.chessoverlay.overlay.Shape.Poly>().map { it.fill ushr 24 }
+        // The same drawing, each shape at 55 %.
+        assertEquals(fills(plain).map { (it * 0.55f).toInt() }, fills(expected))
+        assertEquals(0xE6, fills(plain).last())
+        assertTrue(fills(expected).last() < 0x90)
+        // The card fades it, as it fades the last position's lines.
+        fun text(s: io.github.chessoverlay.overlay.OverlayState, t: String) =
+            io.github.chessoverlay.overlay.CardLayer.build(s, 380f, io.github.chessoverlay.overlay.CardStyle(),
+                io.github.chessoverlay.overlay.CardControls(), m, false).shapes
+                .filterIsInstance<io.github.chessoverlay.overlay.Shape.Text>().first { it.text == t }
+        assertEquals(0xFF, text(plain, "Bb5").color ushr 24)
+        assertTrue(text(expected, "Bb5").color ushr 24 < 0xFF)
+    }
+
+    @Test
     fun outcomes() {
         // From a phone log: 1...Kb4 2.Bd2 is mate (a5 is seen by the bishop through the king's square).
         assertEquals("Checkmate: White wins", Board.fromPlacement("8/8/6R1/3P4/1kP1N3/pP5P/P2B2P1/5K2").outcome(false))

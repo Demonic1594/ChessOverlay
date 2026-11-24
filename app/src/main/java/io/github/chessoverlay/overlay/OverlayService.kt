@@ -91,6 +91,8 @@ class OverlayService : Service() {
     @Volatile private var shown = true
     /** The card's screen rectangle (x0, y0, x1, y1), for covers and clean captures. */
     @Volatile private var cardRect: IntArray? = null
+    /** While a read's capture is pending, the board layer shows nothing whatever the analyst publishes (see captureBoard). */
+    @Volatile private var holdDrawing = false
 
     // Auto mode (worker thread only).
     private var busy = false
@@ -302,7 +304,7 @@ class OverlayService : Service() {
         pendingState = null
         lastPush = SystemClock.uptimeMillis()
         pushedKey = positionKey(s)
-        draw?.state = s
+        if (!holdDrawing) draw?.state = s
         card?.state = s
         s.corners?.let { placeCard(it) }
         lastPosition = analyst?.position()
@@ -401,13 +403,17 @@ class OverlayService : Service() {
         override fun run() {
             if (!auto) return
             guarded("auto") { autoStep() }
-            work.postDelayed(this, POLL_MS)
+            work.postDelayed(this, if (analyst?.board?.fastGame() == true) POLL_MS_FAST else POLL_MS)
         }
     }
 
     private fun autoStep() {
         val a = analyst ?: return
         if (busy) return
+        // In a fast game (moves less than 1.5 s apart of late) the board is checked more often and read after
+        // a shorter stillness: pieces in flight are still not read (AutoReadTimingTest), and a move lands
+        // sooner in the analysis.
+        watcher.stillMs = if (a.board.fastGame()) STILL_MS_FAST else STILL_MS
         val now = SystemClock.uptimeMillis()
         if (now < retryAt) return
         val tracker = a.board
@@ -478,10 +484,15 @@ class OverlayService : Service() {
             DebugLog.e(TAG, "move from the changed squares failed", e)
             false
         }
-        cleanCapture(hideCard = !auto) { img ->
+        var drawingBackDone = false
+        captureBoard { img ->
           try {
-            // Taken: the new position's arrows may show while the recognizer checks it.
-            if (fast) main.post { draw?.blank = false }
+            if (fast) {
+                // The new position is published: its drawing (what the engine expected, if anything) may show
+                // while the recognizer checks it.
+                drawingBack()
+                drawingBackDone = true
+            }
             guarded("analyse") {
                 val moved = img != null && checkCapture && !watcher.captureMatches(img, a.board)
                 val r = when {
@@ -510,43 +521,50 @@ class OverlayService : Service() {
                     }
                 }
             }
-            // The new state (if any) was posted first; now the arrows may show again.
-            main.post { draw?.blank = false }
           } finally {
-            // Even if the thread's last act was an error: a busy overlay reads nothing more.
+            // Even if the thread's last act was an error: a busy overlay reads nothing more, and the drawing follows the state again.
             busy = false
+            if (!drawingBackDone) drawingBack()
           }
         }
     }
 
-    /**
-     * Clear what covers the board (the board layer is blanked; the card is
-     * hidden if it lies over the board, or always with `hideCard`), wait for
-     * a frame without it, grab. The card comes back at once; the board layer
-     * only once the result is in (see read), so a move's old arrows do not
-     * flash back before the new ones.
-     */
-    private fun cleanCapture(hideCard: Boolean, then: (Img?) -> Unit) {
-        val region = analyst?.board?.region()
-        val hideDraw = shown && draw?.state?.corners != null
-        val c = cardRect
-        val overBoard = c != null && region != null &&
-            c[0] < region[2] && c[2] > region[0] && c[1] < region[3] && c[3] > region[1]
-        val hideCard = hideCard || overBoard
-        if (!hideDraw && !hideCard) { then(screen?.grab()); return }
+    /** After a capture: the board layer follows the overlay's state again (the new position's lines, or those of the position before if it did not change). */
+    private fun drawingBack() {
         main.post {
-            if (hideDraw) draw?.blank = true
+            holdDrawing = false
+            analyst?.let { draw?.state = it.state() }
+        }
+    }
+
+    /**
+     * Take the screen without our drawing on the board, then look at it.
+     *
+     * The drawing goes when the read starts (it belongs to the position
+     * before, and must be neither captured nor flash back before the new
+     * one), and the overlay keeps it off until the capture is taken: there is
+     * no frame in which it is blanked and put back. The card is hidden for
+     * the capture only if it lies over the board.
+     */
+    private fun captureBoard(then: (Img?) -> Unit) {
+        val region = analyst?.board?.region()
+        val c = cardRect
+        val hideCard = c != null && region != null &&
+            c[0] < region[2] && c[2] > region[0] && c[1] < region[3] && c[3] > region[1]
+        holdDrawing = true
+        main.post {
+            // A frame captured in the last moment may still show the drawing: then a newer one is waited for.
+            val hiddenAt = SystemClock.uptimeMillis() - if (draw?.clear() == true) 0L else HIDE_WAIT_MS
             if (hideCard) card?.visibility = View.INVISIBLE
-            val hiddenAt = SystemClock.uptimeMillis()
             work.post(object : Runnable {
                 var waited = 0L
                 override fun run() {
                     val s = screen
                     if (s == null) { then(null); return }
                     if (s.latestTime > hiddenAt + 16 || waited >= HIDE_WAIT_MS) {
-                        val img = s.grab()
+                        // The frame is in: the card may come back (the copying of the frame takes longer).
                         main.post { card?.visibility = View.VISIBLE }
-                        then(img)
+                        then(s.grab())
                     } else {
                         waited += 16
                         work.postDelayed(this, 16)
@@ -701,7 +719,9 @@ class OverlayService : Service() {
 
         private const val SAME_POSITION_MS = 450L   // engine updates for one position: about 2 a second
         private const val POLL_MS = 30L             // board check, overlay showing
+        private const val POLL_MS_FAST = 20L        // ... in a fast game
         private const val STILL_MS = 80L            // the board must not move for this long
+        private const val STILL_MS_FAST = 55L       // ... in a fast game
         private const val MIN_CHANGED = 2           // a move changes at least two squares
         private const val FIND_MS = 1000L           // no board yet: look this often...
         private const val FIND_STILL_MS = 300L      // ...once the screen has been still this long

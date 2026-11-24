@@ -87,7 +87,8 @@ object BoardLayer {
                 if (st.arrowLabels) marks += pill(g.centre(mv.to, 0f, 0.34f), best!!.scoreText(s.whiteToMove), sq * 0.2f, LINE_COLORS[0], m)
             }
         }
-        return out + marks
+        val all = out + marks
+        return if (s.provisional) all.map { it.alphaScaled(0.55f) } else all
     }
 
     /**

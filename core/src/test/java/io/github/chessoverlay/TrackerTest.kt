@@ -312,6 +312,41 @@ class TrackerTest {
         assertFalse(t.whiteToMove)
     }
 
+    @Test fun thePaceOfTheGame() {
+        var now = 0L
+        val t = BoardTracker { now }
+        val s = Board.fromPlacement(start)
+        t.accept(render(s), rec(s), null, strict = true)
+        assertNull(t.paceMs())
+        assertFalse(t.fastGame())
+        // 1. Nf3 Nf6 2. Ng1 Ng8 3. Nf3 Nf6, a move every 400 ms: bullet.
+        val line = listOf("g1f3", "g8f6", "f3g1", "f6g8", "g1f3", "g8f6")
+        for (i in line.indices) {
+            now += 400
+            val b = after(start, *line.take(i + 1).toTypedArray())
+            t.accept(render(b), rec(b), null, strict = true)
+        }
+        assertEquals(400L, t.paceMs())
+        assertTrue(t.fastGame())
+        // A step back starts the timing again.
+        now += 1000
+        val first = after(start, "g1f3")
+        // Two squares differ: read twice, as in auto mode.
+        assertTrue(t.accept(render(first), rec(first), null, strict = true) is BoardTracker.Result.Invalid)
+        assertTrue(t.accept(render(first), rec(first), null, strict = true) is BoardTracker.Result.Position)
+        assertNull(t.paceMs())
+        // A slow game is not a fast one.
+        val u = BoardTracker { now }
+        u.accept(render(s), rec(s), null, strict = true)
+        for (i in line.indices) {
+            now += 3000
+            val b = after(start, *line.take(i + 1).toTypedArray())
+            u.accept(render(b), rec(b), null, strict = true)
+        }
+        assertEquals(3000L, u.paceMs())
+        assertFalse(u.fastGame())
+    }
+
     @Test fun inCheckSideMustMove() {
         val t = BoardTracker()
         val b = Board.fromPlacement("4k3/8/8/8/8/8/8/K3R3")  // black in check

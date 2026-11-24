@@ -3,6 +3,7 @@ package io.github.chessoverlay.overlay
 import io.github.chessoverlay.DebugLog
 import io.github.chessoverlay.chess.Board
 import io.github.chessoverlay.engine.AnalysisUpdate
+import io.github.chessoverlay.engine.Continuation
 import io.github.chessoverlay.engine.EngineHost
 import io.github.chessoverlay.engine.FirstLinesGate
 import io.github.chessoverlay.engine.LineStabilizer
@@ -52,6 +53,8 @@ class Analyst(
     private var lostReads = 0
     private val gate = FirstLinesGate<AnalysisUpdate>(MIN_DEPTH, FIRST_LINES_MS)
     private var releaseFor = -1L
+    private var pendingFor = -1L
+    private var pendingAt = 0L
 
     private data class Pending(val move: String, val before: Board, val bestBefore: PvLine, val whiteBefore: Boolean)
 
@@ -111,6 +114,7 @@ class Analyst(
 
     private fun show(u: AnalysisUpdate) {
         val s = state
+        val now = System.currentTimeMillis()
         if (u.noLegalMove) {
             // The engine has no move to search for: checkmate or stalemate. The
             // rules here did not see it (a capture en passant or a castling a
@@ -134,12 +138,27 @@ class Analyst(
         // Lines arriving end "Analysing…" and "restarting…"; other messages stay until the next position.
         val passing = s.status == ANALYSING || s.status.startsWith("Engine ")
         val status = if (passing && u.lines.isNotEmpty()) "" else s.status
-        val shown = stabilizer.offer(u.lines, u.finished)
+        val shown = stabilizer.offer(u.lines, u.finished, now)
+        // A change of the arrows that waits for a second iteration is shown when it has waited long enough,
+        // even if the engine's next iteration is slower than that.
+        stabilizer.pendingChange()?.let { (since, _) ->
+            if (pendingFor != u.id || pendingAt != since) {
+                pendingFor = u.id
+                pendingAt = since
+                val id = u.id
+                timer.schedule({
+                    synchronized(lock) { if (id == requestId) stabilizer.expired()?.let { late -> publish(state.copy(lines = late)) } }
+                }, (since + stabilizer.maxPendingMs - now).coerceAtLeast(0), TimeUnit.MILLISECONDS)
+            }
+        }
         publish(s.copy(status = status, searching = !u.finished, lines = shown, lastMove = mark))
     }
 
     /** The game on screen; read it only from the thread that calls look(). */
     val board: BoardTracker get() = tracker
+
+    /** What the overlay shows now (any thread). */
+    fun state(): OverlayState = synchronized(lock) { state }
 
     /** The position analysed from a move seen at once, until look() has checked it. */
     private var fastShown: BoardTracker.Result.Position? = null
@@ -310,6 +329,11 @@ class Analyst(
         pendingGrade = if (annotate && move != null && previous != null && bestBefore != null &&
             previousWhite != white) Pending(move, previous, bestBefore, previousWhite) else null
         best = null
+        // In a fast game the first lines cannot wait for deep ones: from depth 4 at once, or shallower ones after
+        // a moment; otherwise from depth 8, or after 150 ms (an engine whose depth is capped).
+        val fast = tracker.fastGame()
+        gate.minDepth = if (fast) FAST_MIN_DEPTH else MIN_DEPTH
+        gate.waitMs = if (fast) FAST_LINES_MS else FIRST_LINES_MS
         gate.start(System.currentTimeMillis())
         val fen = board.fen(white)
         val over = board.outcome(white)
@@ -324,7 +348,12 @@ class Analyst(
                 moveNumber = tracker.moveNumber, repetitions = tracker.repetitions))
             return
         }
-        DebugLog.i(TAG, "analyse $fen" + (move?.let { " after $it" } ?: "") + noteOf(tracker))
+        // What the engine expected here: its line for the position before, when the move played began it. It is
+        // shown dimmed at once, so the arrows are not gone until the search's own lines come.
+        val expected = if (previous != null && move != null && previousWhite != white && !s.provisional &&
+            s.board?.placement() == previous.placement()) Continuation.after(s.lines, move) else null
+        DebugLog.i(TAG, "analyse $fen" + (move?.let { " after $it" } ?: "") + noteOf(tracker) + (if (fast) " (fast game)" else "") +
+            (if (expected != null) "; expected: ${expected.pv.joinToString(" ")}" else ""))
         publish(OverlayState(
             status = ANALYSING,
             searching = true,
@@ -335,6 +364,8 @@ class Analyst(
             playedMove = move,
             moveNumber = tracker.moveNumber,
             repetitions = tracker.repetitions,
+            lines = listOfNotNull(expected),
+            provisional = expected != null,
         ))
         requestId = engine.analyse(fen, lines, thinkMs)
     }
@@ -387,6 +418,9 @@ class Analyst(
         /** Squares that differ from the last read beyond which the board itself moved (a move changes 2 to 8). */
         private const val RELOCATE_SQUARES = 12
         private const val FIRST_LINES_MS = 150L
+        /** In a fast game: from depth 4 at once, shallower lines after 40 ms. */
+        private const val FAST_MIN_DEPTH = 4
+        private const val FAST_LINES_MS = 40L
 
         /** Shows held first lines when their wait is over (one daemon thread for all). */
         private val timer by lazy {
