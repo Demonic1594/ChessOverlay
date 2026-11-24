@@ -126,6 +126,20 @@ class Img(val w: Int, val h: Int, val px: IntArray = IntArray(w * h)) {
         val MEAN = floatArrayOf(0.485f, 0.456f, 0.406f)
         val STD = floatArrayOf(0.229f, 0.224f, 0.225f)
 
+        /** An image from "w h" and a newline, then w x h pixels as RGB bytes (the test images' format). */
+        fun fromRgb(bytes: ByteArray): Img {
+            val end = bytes.indexOf('\n'.code.toByte())
+            require(end > 0) { "no size line" }
+            val (w, h) = String(bytes, 0, end).trim().split(Regex("\\s+")).map { it.toInt() }
+            require(w > 0 && h > 0 && bytes.size >= end + 1 + 3 * w * h) { "the image is shorter than $w x $h" }
+            val img = Img(w, h)
+            for (i in 0 until w * h) {
+                val o = end + 1 + 3 * i
+                img.px[i] = ((bytes[o].toInt() and 0xff) shl 16) or ((bytes[o + 1].toInt() and 0xff) shl 8) or (bytes[o + 2].toInt() and 0xff)
+            }
+            return img
+        }
+
         private fun clip8(v: Int): Int {
             val s = v shr PRECISION_BITS
             return if (s < 0) 0 else if (s > 255) 255 else s

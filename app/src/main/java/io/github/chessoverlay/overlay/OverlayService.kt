@@ -2,6 +2,8 @@ package io.github.chessoverlay.overlay
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -23,10 +25,12 @@ import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import java.util.zip.GZIPInputStream
 import io.github.chessoverlay.DebugCapture
 import io.github.chessoverlay.DebugLog
 import io.github.chessoverlay.MainActivity
 import io.github.chessoverlay.Prefs
+import io.github.chessoverlay.engine.EngineCheck
 import io.github.chessoverlay.engine.EngineHost
 import io.github.chessoverlay.engine.EngineRegistry
 import io.github.chessoverlay.vision.BoardTracker
@@ -34,6 +38,8 @@ import io.github.chessoverlay.vision.ChangeWatcher
 import io.github.chessoverlay.vision.Img
 import io.github.chessoverlay.vision.ModelStore
 import io.github.chessoverlay.vision.Recognizer
+import io.github.chessoverlay.vision.RecognizerMode
+import io.github.chessoverlay.vision.Tuner
 
 /**
  * The overlay: reads the screen, follows the board, runs the engine and
@@ -49,7 +55,8 @@ import io.github.chessoverlay.vision.Recognizer
  * the overlay showing (points under our own drawing are skipped, see
  * BoardTracker.Cover). When at least two squares differ from the last read
  * and the board has not moved for STILL_MS, it is read again on a clean
- * capture (the board layer hidden for one frame, once per move). A capture
+ * capture (the board layer is taken off when the read starts and kept off
+ * until the capture is taken). A capture
  * that does not match the still board it was taken for (a piece started
  * moving) is thrown away, so a piece in flight is never read. Misreads are
  * retried with a growing pause and never replace the analysis.
@@ -76,7 +83,7 @@ class OverlayService : Service() {
     private var cardLp: WindowManager.LayoutParams? = null
     private var engine: EngineHost? = null
     private var recognizer: Recognizer? = null
-    private var analyst: Analyst? = null
+    @Volatile private var analyst: Analyst? = null
     private var density = 1f
     private var screenW = 0
     private var screenH = 0
@@ -85,6 +92,8 @@ class OverlayService : Service() {
     @Volatile private var shown = true
     /** The card's screen rectangle (x0, y0, x1, y1), for covers and clean captures. */
     @Volatile private var cardRect: IntArray? = null
+    /** While a read's capture is pending, the board layer shows nothing whatever the analyst publishes (see captureBoard). */
+    @Volatile private var holdDrawing = false
 
     // Auto mode (worker thread only).
     private var busy = false
@@ -145,12 +154,21 @@ class OverlayService : Service() {
         }
     }
 
+    private var lastError: String? = null
+    private var lastErrorAt = 0L
+
     private fun guarded(what: String, block: () -> Unit) {
         try {
             block()
         } catch (e: Throwable) {
             DebugLog.e(TAG, "$what failed", e)
-            postState(OverlayState(status = "Error ($what): ${e.message}"))
+            // The same error at every board check would flicker the card with
+            // it (and hide the lines each time): it is shown again only after two seconds.
+            val message = "Error ($what): ${e.message}"
+            val now = SystemClock.uptimeMillis()
+            if (message != lastError || now - lastErrorAt > 2000) postState(OverlayState(status = message))
+            lastError = message
+            lastErrorAt = now
         }
     }
 
@@ -195,18 +213,20 @@ class OverlayService : Service() {
         if (!models.ready) { postState(OverlayState(status = "Download the recognition models in the app first")); return }
         postState(OverlayState(status = "Loading the recognizer…"))
         models.prepare()
-        val rec = Recognizer(models.board, models.locator, threads = 2)
-        recognizer = rec
         val reg = EngineRegistry(this)
         val all = reg.all()
         val info = all.firstOrNull { it.id == prefs.engineId } ?: all.firstOrNull()
         if (info == null) { postState(OverlayState(status = "No engine installed")); return }
-        lateinit var a: Analyst
+        // Until the analyst exists (the engine may be started to measure recognition first), the engine's news is not for anyone.
+        var ready: Analyst? = null
         val host = EngineHost(info.file, reg.workDir, prefs.engineOptions(info.id),
-            onUpdate = { u -> a.onEngine(u) },
-            onStatus = { s -> a.status(s) })
+            onUpdate = { u -> ready?.onEngine(u) },
+            onStatus = { s -> ready?.status(s) })
         engine = host
-        a = Analyst(rec, host) { st -> postState(st) }.apply {
+        val rec = Recognizer(models.board, models.locator, howToRead(models, host))
+        recognizer = rec
+        if (rec.mode != RecognizerMode.DEFAULT) prefs.recognizerInUse = rec.mode.toString()
+        val a = Analyst(rec, host) { st -> postState(st) }.apply {
             lines = prefs.lines
             thinkMs = prefs.thinkMs.toLong()
             minConfidence = prefs.minConfidence
@@ -215,10 +235,48 @@ class OverlayService : Service() {
             pathPlies = prefs.pathPlies
         }
         analyst = a
+        ready = a
         host.start()
         DebugLog.i(TAG, "ready: ${info.title}, ${prefs.lines} lines, think ${prefs.thinkMs} ms")
         postState(OverlayState(status = if (prefs.autoStart) "Looking for a board…" else "Tap ▶ to read the screen, A for auto mode"))
         main.post { if (prefs.autoStart && !auto) toggleAuto() }
+    }
+
+    /**
+     * How the models are run on this phone (see Tuner): measured once, the
+     * first time the overlay starts, with the engine searching as it will be
+     * then, and kept. When measuring fails, the default is used.
+     */
+    private fun howToRead(models: ModelStore, host: EngineHost): RecognizerMode {
+        var saved = RecognizerMode.parse(prefs.recognizerMode)
+        prefs.recognizerInUse?.let { died ->
+            // Set when the overlay starts with a way that is not the default, cleared when it stops: it is
+            // still set, so the app died while using it. Not that way again, or it would die at every start.
+            DebugLog.w(TAG, "the app went away while reading with $died; ${RecognizerMode.DEFAULT} is used from now on")
+            saved = RecognizerMode.DEFAULT
+            prefs.recognizerMode = null
+        }
+        prefs.recognizerInUse = null
+        if (prefs.recognizerTuned) return saved
+        postState(OverlayState(status = "Measuring how to read fastest (once)…"))
+        try {
+            val sample = Tuner.sample(assets.open(Tuner.SAMPLE))
+            host.start()
+            host.analyse(EngineCheck.FEN, 3, 0)
+            SystemClock.sleep(800)   // until the engine searches
+            val result = Tuner.tune(models.board, models.locator, sample, progress = { i, n ->
+                postState(OverlayState(status = "Measuring how to read fastest (once): $i of $n…"))
+            })
+            prefs.recognizerMode = result.chosen.toString()
+            prefs.recognizerTuned = true
+            DebugLog.i(TAG, "recognition measured:\n${result.report()}")
+            return result.chosen
+        } catch (e: Throwable) {
+            DebugLog.e(TAG, "could not measure recognition; $saved is used", e)
+            return saved
+        } finally {
+            host.stop()
+        }
     }
 
     private fun boardStyle() = BoardStyle(prefs.arrows, prefs.pathPlies, prefs.arrowLabels, density)
@@ -247,9 +305,10 @@ class OverlayService : Service() {
         pendingState = null
         lastPush = SystemClock.uptimeMillis()
         pushedKey = positionKey(s)
-        draw?.state = s
+        if (!holdDrawing) draw?.state = s
         card?.state = s
         s.corners?.let { placeCard(it) }
+        lastPosition = analyst?.position()
     }
 
     // ---- the card ---------------------------------------------------------
@@ -322,6 +381,21 @@ class OverlayService : Service() {
         }
 
         override fun onFold(collapsed: Boolean) { prefs.cardCollapsed = collapsed }
+        override fun onLongPress() = copyPosition()
+    }
+
+    /** A finger kept on the card: the position as a FEN in the clipboard, for pasting anywhere. */
+    private fun copyPosition() {
+        val fen = analyst?.position()?.fen ?: return
+        try {
+            getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("ChessOverlay position", fen))
+            DebugLog.i(TAG, "position copied: $fen")
+            analyst?.flash(COPIED)
+            work.postDelayed({ analyst?.unflash(COPIED) }, FLASH_MS)
+        } catch (e: Exception) {
+            DebugLog.e(TAG, "could not copy the position", e)
+            analyst?.flash("Could not copy the position")
+        }
     }
 
     // ---- auto mode -------------------------------------------------------
@@ -330,13 +404,17 @@ class OverlayService : Service() {
         override fun run() {
             if (!auto) return
             guarded("auto") { autoStep() }
-            work.postDelayed(this, POLL_MS)
+            work.postDelayed(this, if (analyst?.board?.fastGame() == true) POLL_MS_FAST else POLL_MS)
         }
     }
 
     private fun autoStep() {
         val a = analyst ?: return
         if (busy) return
+        // In a fast game (moves less than 1.5 s apart of late) the board is checked more often and read after
+        // a shorter stillness: pieces in flight are still not read (AutoReadTimingTest), and a move lands
+        // sooner in the analysis.
+        watcher.stillMs = if (a.board.fastGame()) STILL_MS_FAST else STILL_MS
         val now = SystemClock.uptimeMillis()
         if (now < retryAt) return
         val tracker = a.board
@@ -407,9 +485,15 @@ class OverlayService : Service() {
             DebugLog.e(TAG, "move from the changed squares failed", e)
             false
         }
-        cleanCapture(hideCard = !auto) { img ->
-            // Taken: the new position's arrows may show while the recognizer checks it.
-            if (fast) main.post { draw?.blank = false }
+        var drawingBackDone = false
+        captureBoard { img ->
+          try {
+            if (fast) {
+                // The new position is published: its drawing (what the engine expected, if anything) may show
+                // while the recognizer checks it.
+                drawingBack()
+                drawingBackDone = true
+            }
             guarded("analyse") {
                 val moved = img != null && checkCapture && !watcher.captureMatches(img, a.board)
                 val r = when {
@@ -428,48 +512,60 @@ class OverlayService : Service() {
                     if (r == Look.NEW || r == Look.SAME) {
                         misses = 0; retryAt = 0L
                     } else if (auto) {
-                        // Keep what the recognizer saw when it keeps failing, to share from the app.
-                        if (misses >= 1 && img != null) DebugCapture.save(this@OverlayService, img, "$r")
+                        // Keep the screen when a board is read wrongly time and again, to
+                        // share from the app. Not when there is no board: that is any
+                        // other screen the user went to.
+                        if (misses >= 1 && img != null && r != Look.NO_BOARD) DebugCapture.save(this@OverlayService, img, "$r")
                         // A misread or no board: try again soon, then less often.
                         misses = minOf(misses + 1, 5)
                         retryAt = now + (RETRY_MS shl (misses - 1))
                     }
                 }
             }
-            // The new state (if any) was posted first; now the arrows may show again.
-            main.post { draw?.blank = false }
+          } finally {
+            // Even if the thread's last act was an error: a busy overlay reads nothing more, and the drawing follows the state again.
             busy = false
+            if (!drawingBackDone) drawingBack()
+          }
+        }
+    }
+
+    /** After a capture: the board layer follows the overlay's state again (the new position's lines, or those of the position before if it did not change). */
+    private fun drawingBack() {
+        main.post {
+            holdDrawing = false
+            analyst?.let { draw?.state = it.state() }
         }
     }
 
     /**
-     * Clear what covers the board (the board layer is blanked; the card is
-     * hidden if it lies over the board, or always with `hideCard`), wait for
-     * a frame without it, grab. The card comes back at once; the board layer
-     * only once the result is in (see read), so a move's old arrows do not
-     * flash back before the new ones.
+     * Take the screen without our drawing on the board, then look at it.
+     *
+     * The drawing goes when the read starts (it belongs to the position
+     * before, and must be neither captured nor flash back before the new
+     * one), and the overlay keeps it off until the capture is taken: there is
+     * no frame in which it is blanked and put back. The card is hidden for
+     * the capture only if it lies over the board.
      */
-    private fun cleanCapture(hideCard: Boolean, then: (Img?) -> Unit) {
+    private fun captureBoard(then: (Img?) -> Unit) {
         val region = analyst?.board?.region()
-        val hideDraw = shown && draw?.state?.corners != null
         val c = cardRect
-        val overBoard = c != null && region != null &&
+        val hideCard = c != null && region != null &&
             c[0] < region[2] && c[2] > region[0] && c[1] < region[3] && c[3] > region[1]
-        val hideCard = hideCard || overBoard
-        if (!hideDraw && !hideCard) { then(screen?.grab()); return }
+        holdDrawing = true
         main.post {
-            if (hideDraw) draw?.blank = true
+            // A frame captured in the last moment may still show the drawing: then a newer one is waited for.
+            val hiddenAt = SystemClock.uptimeMillis() - if (draw?.clear() == true) 0L else HIDE_WAIT_MS
             if (hideCard) card?.visibility = View.INVISIBLE
-            val hiddenAt = SystemClock.uptimeMillis()
             work.post(object : Runnable {
                 var waited = 0L
                 override fun run() {
                     val s = screen
                     if (s == null) { then(null); return }
                     if (s.latestTime > hiddenAt + 16 || waited >= HIDE_WAIT_MS) {
-                        val img = s.grab()
+                        // The frame is in: the card may come back (the copying of the frame takes longer).
                         main.post { card?.visibility = View.VISIBLE }
-                        then(img)
+                        then(s.grab())
                     } else {
                         waited += 16
                         work.postDelayed(this, 16)
@@ -594,6 +690,7 @@ class OverlayService : Service() {
         draw = null; card = null
         val e = engine; val r = recognizer; val s = screen
         engine = null; recognizer = null; analyst = null; screen = null
+        prefs.recognizerInUse = null
         work.post {
             runCatching { e?.close() }
             runCatching { r?.close() }
@@ -613,12 +710,19 @@ class OverlayService : Service() {
         /** The overlay is on (for the app's Start / Stop button). */
         @Volatile var running = false
             private set
+        /** The position the overlay saw last, for the app's position card; it stays after the overlay stops. */
+        @Volatile var lastPosition: Analyst.Position? = null
+            internal set
+        private const val COPIED = "Position copied (FEN)"
+        private const val FLASH_MS = 2500L
         private const val CHANNEL = "overlay"
         private const val TAG = "Overlay"
 
         private const val SAME_POSITION_MS = 450L   // engine updates for one position: about 2 a second
         private const val POLL_MS = 30L             // board check, overlay showing
+        private const val POLL_MS_FAST = 20L        // ... in a fast game
         private const val STILL_MS = 80L            // the board must not move for this long
+        private const val STILL_MS_FAST = 55L       // ... in a fast game
         private const val MIN_CHANGED = 2           // a move changes at least two squares
         private const val FIND_MS = 1000L           // no board yet: look this often...
         private const val FIND_STILL_MS = 300L      // ...once the screen has been still this long

@@ -23,9 +23,11 @@ import io.github.chessoverlay.overlay.CardStyle
 import io.github.chessoverlay.overlay.CardView
 import io.github.chessoverlay.overlay.DrawView
 import io.github.chessoverlay.overlay.MoveMark
+import io.github.chessoverlay.overlay.OverlayService
 import io.github.chessoverlay.overlay.OverlayState
 import io.github.chessoverlay.vision.Img
 import io.github.chessoverlay.vision.Recognizer
+import io.github.chessoverlay.vision.Tuner
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -74,6 +76,25 @@ class DeviceTest {
         }
     }
 
+    /** The Positions card with a position and two kept ones. The overlay needs a screen to capture, so the position is put where it leaves its last one. */
+    @Test fun positionsCard() {
+        val p = Analyst.Position("r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3", true, 3, "+0.4", 24,
+            "3. Bb5 a6 4. Ba4 Nf6")
+        OverlayService.lastPosition = p
+        KeptPositions.clear(ctx)
+        KeptPositions.add(ctx, p)
+        KeptPositions.add(ctx, Analyst.Position("8/8/6R1/3P4/1kP1N3/pP5P/P2B2P1/5K2 b - - 0 1", false, null, "M3", 30, "1... Kb4 2. Bd2#"))
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { s ->
+                Thread.sleep(1200)
+                s.onActivity { a -> saveWholePage(a.findViewById(R.id.content), a.window.decorView.width, "positions.png") }
+            }
+        } finally {
+            KeptPositions.clear(ctx)
+            OverlayService.lastPosition = null
+        }
+    }
+
     @Test fun engineOptionsScreen() {
         val engine = EngineRegistry(ctx).bundled().firstOrNull()
         assumeTrue("no bundled engine for this ABI", engine != null)
@@ -100,6 +121,53 @@ class DeviceTest {
         c.drawColor(Color.rgb(0x0F, 0x11, 0x13))
         content.draw(c)
         storage.openOutputFile(name).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    /**
+     * The app icon as a launcher shows it (in a round mask, on a light and on a
+     * dark wallpaper), its foreground on its own, the monochrome layer as themed
+     * icons use it, and the status bar's icon: PNGs for review. The shapes are
+     * made by tools/icon.py; this shows what Android makes of them.
+     */
+    @Test fun appIconRenders() {
+        val icon = ctx.getDrawable(R.mipmap.ic_launcher)
+        assertTrue("the launcher icon is not an adaptive icon", icon is android.graphics.drawable.AdaptiveIconDrawable)
+        val adaptive = icon as android.graphics.drawable.AdaptiveIconDrawable
+        icon.setBounds(0, 0, 432, 432)
+        // The system's own mask is applied by the drawable; for the monochrome layer, drawn by hand below, a circle of the size a launcher's mask has stands in.
+        val circle = android.graphics.Path().apply { addCircle(216f, 216f, 216f, android.graphics.Path.Direction.CW) }
+        fun png(name: String, size: Int, wallpaper: Int, draw: (Canvas) -> Unit) {
+            val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val c = Canvas(bmp)
+            c.drawColor(wallpaper)
+            draw(c)
+            storage.openOutputFile(name).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+        for ((name, paper) in listOf("icon.png" to Color.rgb(0xE9, 0xEC, 0xEF), "icon_dark.png" to Color.rgb(0x17, 0x1A, 0x1F))) {
+            png(name, 432, paper) { icon.draw(it) }
+        }
+        // The foreground alone: the whole 108 x 108 it is drawn on.
+        png("icon_layer.png", 540, Color.rgb(0x1B, 0x24, 0x33)) { c ->
+            c.translate(54f, 54f)
+            adaptive.foreground.draw(c)
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            val mono = adaptive.monochrome
+            assertTrue("no monochrome layer (themed icons)", mono != null)
+            mono!!.setTint(0xFF2A3340.toInt())
+            mono.setTintMode(android.graphics.PorterDuff.Mode.SRC_IN)
+            png("icon_themed.png", 432, Color.rgb(0xE3, 0xE7, 0xED)) { c ->
+                c.save()
+                c.clipPath(circle)
+                mono.draw(c)
+                c.restore()
+            }
+        }
+        png("notification_icon.png", 384, Color.rgb(0x1A, 0x1D, 0x23)) { c ->
+            val small = ctx.getDrawable(R.drawable.ic_stat_overlay)!!
+            small.setBounds(48, 48, 336, 336)
+            small.draw(c)
+        }
     }
 
     @Test fun bundledEngineAnalysesOnAndroid() {
@@ -149,6 +217,29 @@ class DeviceTest {
         }
     }
 
+    /**
+     * The tuner on Android's ONNX Runtime, which has XNNPACK and NNAPI: every
+     * way that runs reads the sample as the default does, and the way it keeps
+     * reads it right. The table is written out (tuning.txt).
+     */
+    @Test fun recognizerIsMeasuredOnAndroid() {
+        assumeTrue("models not pushed to $models", File(models, "board.onnx").exists())
+        val result = Tuner.tune(File(models, "board.onnx"), File(models, "locator.onnx"), image("screen1"),
+            Tuner.candidates(all = true), warmUps = 2, runs = 5)
+        // The ways the overlay measures by itself all run.
+        Tuner.tune(File(models, "board.onnx"), File(models, "locator.onnx"), image("screen1"), warmUps = 1, runs = 2).let {
+            assertTrue(it.report(), it.timings.all { t -> t.usable })
+        }
+        DebugLog.i("DeviceTest", "recognition measured:\n${result.report()}")
+        storage.openOutputFile("tuning.txt").use { it.write(result.report().toByteArray()) }
+        assertEquals("8/8/8/4p1K1/2k1P3/8/8/8", result.reading.placement)
+        for (t in result.timings) assertTrue("$t.mode: it ran but read differently", t.error != null || t.agreed == true)
+        assertTrue("the default did not run", result.timings.any { it.mode == io.github.chessoverlay.vision.RecognizerMode.DEFAULT && it.usable })
+        Recognizer(File(models, "board.onnx"), File(models, "locator.onnx"), result.chosen).use { rec ->
+            assertEquals("8/8/8/4p1K1/2k1P3/8/8/8", rec.recognise(image("screen1")).placement)
+        }
+    }
+
     /** Renders the overlay for a known position into a PNG (pulled by CI for review). */
     @Test fun overlayRenders() {
         val b = Board.fromPlacement("r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R")
@@ -189,6 +280,7 @@ class DeviceTest {
             override fun onButton(b: CardButton) {}
             override fun onDrag(dx: Int, dy: Int, done: Boolean) {}
             override fun onFold(collapsed: Boolean) {}
+            override fun onLongPress() {}
         })
         card.state = state
         card.controls = CardControls(auto = true)

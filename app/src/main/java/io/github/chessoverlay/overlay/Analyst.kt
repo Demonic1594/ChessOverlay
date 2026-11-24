@@ -3,6 +3,7 @@ package io.github.chessoverlay.overlay
 import io.github.chessoverlay.DebugLog
 import io.github.chessoverlay.chess.Board
 import io.github.chessoverlay.engine.AnalysisUpdate
+import io.github.chessoverlay.engine.Continuation
 import io.github.chessoverlay.engine.EngineHost
 import io.github.chessoverlay.engine.FirstLinesGate
 import io.github.chessoverlay.engine.LineStabilizer
@@ -52,8 +53,51 @@ class Analyst(
     private var lostReads = 0
     private val gate = FirstLinesGate<AnalysisUpdate>(MIN_DEPTH, FIRST_LINES_MS)
     private var releaseFor = -1L
+    private var pendingFor = -1L
+    private var pendingAt = 0L
 
     private data class Pending(val move: String, val before: Board, val bestBefore: PvLine, val whiteBefore: Boolean)
+
+    /** What the overlay has of a position, to copy it out: to an engine, an analysis site, another chess app. */
+    data class Position(
+        /** The position as a FEN. */
+        val fen: String,
+        val whiteToMove: Boolean,
+        /** The number of the move to be played, when the game was followed from its start; else null. */
+        val moveNumber: Int?,
+        /** The evaluation in pawns from White's view, when lines have come; else null. */
+        val score: String?,
+        val depth: Int,
+        /** The engine's best line in short algebraic notation, with the game's move numbers. */
+        val line: String,
+        /** The same line as UCI moves, to draw it; the evaluation from White's view (centipawns, or moves to a mate). */
+        val pv: List<String> = emptyList(),
+        val whiteCp: Int? = null,
+        val whiteMate: Int? = null,
+        /** The line is what the engine expected of this position, from its line for the one before. */
+        val expected: Boolean = false,
+    ) {
+        val side: String get() = if (whiteToMove) "White to move" else "Black to move"
+
+        /** One line, for a list or a note: "move 12 · White to move · eval +0.4 · depth 24". */
+        fun summary(): String = listOfNotNull(moveNumber?.let { "move $it" }, side, if (expected) "expected" else null,
+            score?.let { "eval $it" }, if (depth > 0) "depth $depth" else null).joinToString(" · ")
+
+        /** For a message: the summary, the line and the FEN. */
+        fun text(): String = summary() + (if (line.isNotEmpty()) "\n$line" else "") + "\n$fen"
+    }
+
+    /** The current position and what the engine has shown of it; null before the first board was read. */
+    fun position(): Position? = synchronized(lock) {
+        val s = state
+        val b = s.board ?: return@synchronized null
+        val top = s.lines.firstOrNull()
+        val white = s.whiteToMove
+        fun white(i: Int?) = i?.let { if (white) it else -it }
+        Position(b.fen(white), white, s.moveNumber, top?.let { CardLayer.shortScore(it, white) },
+            top?.depth ?: 0, top?.let { b.lineText(it.pv, white, 8, s.moveNumber ?: 1) } ?: "",
+            top?.pv ?: emptyList(), white(top?.scoreCp), white(top?.mate), s.provisional)
+    }
 
     /** Engine results, from the engine thread. */
     fun onEngine(u: AnalysisUpdate): Unit = synchronized(lock) {
@@ -79,6 +123,19 @@ class Analyst(
 
     private fun show(u: AnalysisUpdate) {
         val s = state
+        val now = System.currentTimeMillis()
+        if (u.noLegalMove) {
+            // The engine has no move to search for: checkmate or stalemate. The
+            // rules here did not see it (a capture en passant or a castling a
+            // picture cannot rule out was allowed for); say it, so the card
+            // does not stay on "Analysing…".
+            val over = s.board?.let {
+                if (it.inCheck(s.whiteToMove)) "Checkmate: ${if (s.whiteToMove) "Black" else "White"} wins" else "Stalemate: a draw"
+            } ?: "No legal move: checkmate or stalemate"
+            DebugLog.i(TAG, "$over (the engine has no move): ${u.fen}")
+            publish(s.copy(status = over, searching = false, lines = emptyList()))
+            return
+        }
         val top = u.lines.firstOrNull()
         if (top != null) best = top
         var mark = s.lastMove
@@ -90,12 +147,31 @@ class Analyst(
         // Lines arriving end "Analysing…" and "restarting…"; other messages stay until the next position.
         val passing = s.status == ANALYSING || s.status.startsWith("Engine ")
         val status = if (passing && u.lines.isNotEmpty()) "" else s.status
-        val shown = stabilizer.offer(u.lines, u.finished)
-        publish(s.copy(status = status, searching = !u.finished, lines = shown, lastMove = mark))
+        val shown = stabilizer.offer(u.lines, u.finished, now)
+        // A change of the arrows that waits for a second iteration is shown when it has waited long enough,
+        // even if the engine's next iteration is slower than that.
+        stabilizer.pendingChange()?.let { (since, _) ->
+            if (pendingFor != u.id || pendingAt != since) {
+                pendingFor = u.id
+                pendingAt = since
+                val id = u.id
+                timer.schedule({
+                    // The change is the engine's own line: shown as it is, no longer as what it expected.
+                    synchronized(lock) { if (id == requestId) stabilizer.expired()?.let { late -> publish(state.copy(lines = late, provisional = false)) } }
+                }, (since + stabilizer.maxPendingMs - now).coerceAtLeast(0), TimeUnit.MILLISECONDS)
+            }
+        }
+        // The engine's own lines (shown === u.lines) are no longer what it expected of the position, which
+        // was shown dimmed until they came; while a change of them waits, the lines shown before stay as they were.
+        publish(s.copy(status = status, searching = !u.finished, lines = shown, lastMove = mark,
+            provisional = s.provisional && shown !== u.lines))
     }
 
     /** The game on screen; read it only from the thread that calls look(). */
     val board: BoardTracker get() = tracker
+
+    /** What the overlay shows now (any thread). */
+    fun state(): OverlayState = synchronized(lock) { state }
 
     /** The position analysed from a move seen at once, until look() has checked it. */
     private var fastShown: BoardTracker.Result.Position? = null
@@ -151,7 +227,8 @@ class Analyst(
             return Look.FAILED
         }
         val ms = (System.nanoTime() - t0) / 1_000_000
-        DebugLog.i(TAG, "read ${if (located) "after locating" else "at known corners"} ($changed squares changed) in $ms ms: " +
+        DebugLog.i(TAG, "read ${if (located) "after locating" else "at known corners"} ($changed squares changed) in $ms ms " +
+            "[${recognizer.lastTiming}]: " +
             "${rec.placement} ${if (rec.blackAtBottom) "black" else "white"} at bottom, sure ${(rec.confidence * 100).toInt()}%, " +
             "corners ${rec.corners.joinToString(" ") { "${it[0].toInt()},${it[1].toInt()}" }}")
         if (rec.confidence < minConfidence && !located) {
@@ -241,6 +318,7 @@ class Analyst(
                 Look.INVALID
             }
             is BoardTracker.Result.Position -> {
+                if (r.back) DebugLog.i(TAG, "back to a position the game was in before${noteOf(tracker)}: ${r.board.placement()}")
                 start(r.board, r.whiteToMove, r.move, r.previous, r.previousWhiteToMove)
                 Look.NEW
             }
@@ -264,6 +342,11 @@ class Analyst(
         pendingGrade = if (annotate && move != null && previous != null && bestBefore != null &&
             previousWhite != white) Pending(move, previous, bestBefore, previousWhite) else null
         best = null
+        // In a fast game the first lines cannot wait for deep ones: from depth 4 at once, or shallower ones after
+        // a moment; otherwise from depth 8, or after 150 ms (an engine whose depth is capped).
+        val fast = tracker.fastGame()
+        gate.minDepth = if (fast) FAST_MIN_DEPTH else MIN_DEPTH
+        gate.waitMs = if (fast) FAST_LINES_MS else FIRST_LINES_MS
         gate.start(System.currentTimeMillis())
         val fen = board.fen(white)
         val over = board.outcome(white)
@@ -274,10 +357,16 @@ class Analyst(
             pendingGrade = null
             engine.stop()
             publish(OverlayState(status = over, corners = tracker.corners, blackAtBottom = tracker.blackAtBottom,
-                board = board, whiteToMove = white, playedMove = move))
+                board = board, whiteToMove = white, playedMove = move,
+                moveNumber = tracker.moveNumber, repetitions = tracker.repetitions))
             return
         }
-        DebugLog.i(TAG, "analyse $fen" + (move?.let { " after $it" } ?: ""))
+        // What the engine expected here: its line for the position before, when the move played began it. It is
+        // shown dimmed at once, so the arrows are not gone until the search's own lines come.
+        val expected = if (previous != null && move != null && previousWhite != white && !s.provisional &&
+            s.board?.placement() == previous.placement()) Continuation.after(s.lines, move) else null
+        DebugLog.i(TAG, "analyse $fen" + (move?.let { " after $it" } ?: "") + noteOf(tracker) + (if (fast) " (fast game)" else "") +
+            (if (expected != null) "; expected: ${expected.pv.joinToString(" ")}" else ""))
         publish(OverlayState(
             status = ANALYSING,
             searching = true,
@@ -286,9 +375,20 @@ class Analyst(
             board = board,
             whiteToMove = white,
             playedMove = move,
+            moveNumber = tracker.moveNumber,
+            repetitions = tracker.repetitions,
+            lines = listOfNotNull(expected),
+            provisional = expected != null,
         ))
         requestId = engine.analyse(fen, lines, thinkMs)
     }
+
+    /** For the log: the move's number and a repetition, when known. */
+    private fun noteOf(t: BoardTracker): String =
+        (t.moveNumber?.let { " (move $it)" } ?: "") + if (t.repetitions > 1) " (${ordinal(t.repetitions)} time)" else ""
+
+    private fun ordinal(n: Int) = if (n % 100 in 11..13) "${n}th" else
+        when (n % 10) { 1 -> "${n}st"; 2 -> "${n}nd"; 3 -> "${n}rd"; else -> "${n}th" }
 
     fun stop() = engine.stop()
 
@@ -303,6 +403,12 @@ class Analyst(
     }
 
     fun status(s: String) = synchronized(lock) { publish(state.copy(status = s)) }
+
+    /** A message on the card that is not about the analysis (a button was used): [unflash] takes it off again. */
+    fun flash(text: String) = status(text)
+
+    /** Ends a message of [flash] that is still showing (a new position may have replaced it). */
+    fun unflash(text: String) = synchronized(lock) { if (state.status == text) publish(state.copy(status = "")) }
 
     private fun publish(s: OverlayState) {
         state = s
@@ -325,6 +431,9 @@ class Analyst(
         /** Squares that differ from the last read beyond which the board itself moved (a move changes 2 to 8). */
         private const val RELOCATE_SQUARES = 12
         private const val FIRST_LINES_MS = 150L
+        /** In a fast game: from depth 4 at once, shallower lines after 40 ms. */
+        private const val FAST_MIN_DEPTH = 4
+        private const val FAST_LINES_MS = 40L
 
         /** Shows held first lines when their wait is over (one daemon thread for all). */
         private val timer by lazy {

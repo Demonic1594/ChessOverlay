@@ -169,11 +169,73 @@ class LineStabilizerTest {
         org.junit.Assert.assertEquals("c2c4", s.offer(lines(10, "c2c4", "e2e4"), false)[0].pv[0])
     }
 
-    @Test fun deepChangesAndFinalResultsAreShownAtOnce() {
+    @Test fun deepChangesWaitLikeTheOthersAndFinalResultsShowAtOnce() {
         val s = io.github.chessoverlay.engine.LineStabilizer(arrows = 2, pathPlies = 2)
-        s.offer(lines(17, "e2e4", "d2d4"), false)
-        org.junit.Assert.assertEquals("g1f3", s.offer(lines(18, "g1f3", "e2e4"), false)[0].pv[0])
-        org.junit.Assert.assertEquals("d2d4", s.offer(lines(12, "d2d4", "e2e4"), true)[0].pv[0])
+        s.offer(lines(17, "e2e4", "d2d4"), false, now = 0)
+        // Deep iterations are slow, and the engine switches at depth too: one iteration is no proof either.
+        assertEquals("e2e4", s.offer(lines(18, "g1f3", "e2e4"), false, now = 1000)[0].pv[0])
+        assertEquals(1000L to "g1f3", s.pendingChange()?.let { it.first to it.second[0].pv[0] })
+        assertNull(s.expired(now = 1200))
+        assertEquals("g1f3", s.offer(lines(19, "g1f3", "e2e4"), false, now = 1400)[0].pv[0])
+        assertNull(s.pendingChange())
+        // The search ends on another move: that is shown, whatever was waiting.
+        s.offer(lines(21, "g1f3", "e2e4"), false, now = 1500)
+        assertEquals("d2d4", s.offer(lines(12, "d2d4", "e2e4"), true, now = 1600)[0].pv[0])
+        assertNull(s.pendingChange())
+    }
+
+    @Test fun itGivesBackTheEnginesOwnLinesOrTheOnesShownBefore() {
+        // The overlay tells the two apart by the list itself: what the engine expected of a position is shown
+        // dimmed until its own lines come, and only its own (the list it hands over) end that.
+        val s = io.github.chessoverlay.engine.LineStabilizer(arrows = 2, pathPlies = 2)
+        val first = lines(8, "e2e4", "d2d4")
+        org.junit.Assert.assertSame(first, s.offer(first, false))
+        org.junit.Assert.assertSame("a change waits: the lines shown before", first, s.offer(lines(9, "d2d4", "e2e4"), false))
+        val agreed = lines(10, "d2d4", "e2e4")
+        org.junit.Assert.assertSame(agreed, s.offer(agreed, false))
+        val last = lines(22, "g1f3", "d2d4")
+        org.junit.Assert.assertSame("the search ends: what it ended on", last, s.offer(last, true))
+    }
+
+    @Test fun aChangeIsShownWhenItHasWaitedLongEnough() {
+        val s = io.github.chessoverlay.engine.LineStabilizer(arrows = 2, pathPlies = 2)
+        s.offer(lines(17, "e2e4", "d2d4"), false, now = 0)
+        assertEquals("e2e4", s.offer(lines(18, "g1f3", "e2e4"), false, now = 1000)[0].pv[0])
+        assertNull("not yet", s.expired(now = 1699))
+        val late = s.expired(now = 1700)
+        assertEquals("g1f3", late!![0].pv[0])
+        assertNull("nothing waits any more", s.expired(now = 5000))
+        // And what is shown now is the change: the next iteration that agrees changes nothing.
+        assertEquals("g1f3", s.offer(lines(19, "g1f3", "e2e4"), false, now = 5000)[0].pv[0])
+    }
+}
+
+class ContinuationTest {
+    private val before = listOf(
+        io.github.chessoverlay.engine.PvLine(1, 20, 35, null, listOf("e2e4", "e7e5", "g1f3")),
+        io.github.chessoverlay.engine.PvLine(2, 20, -10, null, listOf("d2d4", "d7d5", "c2c4")),
+        io.github.chessoverlay.engine.PvLine(3, 18, 0, 3, listOf("g1f3", "d7d5", "b1c3", "g8f6", "f3e5")),
+    )
+
+    @Test fun theLineThatBeganWithTheMoveGoesOnWithTheScoreTurnedRound() {
+        val after = io.github.chessoverlay.engine.Continuation.after(before, "e2e4")!!
+        assertEquals(listOf("e7e5", "g1f3"), after.pv)
+        assertEquals(1, after.multipv)
+        assertEquals(-35, after.scoreCp)      // the other side is to move now
+        assertNull(after.mate)
+        // The mover was mating in 3: the other side is being mated in 3.
+        val mated = io.github.chessoverlay.engine.Continuation.after(before, "g1f3")!!
+        assertEquals(-3, mated.mate)
+        assertEquals(listOf("d7d5", "b1c3", "g8f6", "f3e5"), mated.pv)
+        assertEquals(listOf("d7d5", "c2c4"), io.github.chessoverlay.engine.Continuation.after(before, "d2d4")!!.pv)
+    }
+
+    @Test fun nothingToExpect() {
+        // Not a first move of any line.
+        assertNull(io.github.chessoverlay.engine.Continuation.after(before, "c2c4"))
+        // A line that looked no further than the move.
+        assertNull(io.github.chessoverlay.engine.Continuation.after(listOf(io.github.chessoverlay.engine.PvLine(1, 9, 0, null, listOf("e2e4"))), "e2e4"))
+        assertNull(io.github.chessoverlay.engine.Continuation.after(emptyList(), "e2e4"))
     }
 }
 

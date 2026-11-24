@@ -4,6 +4,7 @@ import io.github.chessoverlay.chess.Board
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -38,8 +39,38 @@ class BoardTest {
         // now is the one from a1. It does not bring castling back.
         val taken = game("4k3/8/2b5/8/8/8/P6P/R3K2R",
             "a2a4", "e8e7", "h2h4", "e7e8", "a1a3", "c6h1", "a3h3", "h1e4", "h3h1", "e4c6")
-        assertEquals("4k3/8/2b5/8/P6P/8/8/4K2R w - - 0 1", taken.fen(true))
+        assertEquals("4k3/8/2b5/8/P6P/8/8/4K2R w - - 4 1", taken.fen(true))
         assertFalse("e1g1" in taken.legalMoves(true))
+    }
+
+    @Test fun halfmoveClock() {
+        // A pawn move or a capture starts the count again; any other move adds one.
+        assertEquals("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", game(start, "e2e4").fen(false))
+        assertEquals("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1", game(start, "e2e4", "e7e5").fen(true))
+        assertEquals("r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 1",
+            game(start, "e2e4", "e7e5", "g1f3", "b8c6").fen(true))
+        // 3. Bb5 a6 4. Bxc6 dxc6
+        assertEquals("r1bqkbnr/1pp2ppp/p1p5/4p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 0 1",
+            game(start, "e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6", "b5c6", "d7c6").fen(false))
+        // A capture en passant is a capture.
+        assertEquals("rnbqkbnr/1pp1pppp/p2P4/8/8/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+            game(start, "e2e4", "a7a6", "e4e5", "d7d5", "e5d6").fen(false))
+    }
+
+    @Test fun whatIsNotAMoveIsRefused() {
+        for (bad in listOf("0000", "(none)", "e2", "e2e", "e2e4+", "e2e4x", "z9a1", "")) {
+            assertFalse(bad, Board.isMove(bad))
+            assertThrows(IllegalArgumentException::class.java) { Board.fromPlacement(start).play(bad) }
+        }
+        assertTrue(Board.isMove("e2e4"))
+        assertTrue(Board.isMove("e7e8q"))
+        assertTrue(Board.isMove("e1g1"))
+        // An engine line with such a move in it ends there; the overlay does not crash.
+        assertEquals("1. e4", Board.fromPlacement(start).lineText(listOf("e2e4", "0000", "e7e5"), true))
+        val board = Board.fromPlacement(start)
+        assertEquals(listOf("Nf3"), io.github.chessoverlay.overlay.CardLayer.san(board,
+            io.github.chessoverlay.engine.PvLine(1, 10, 0, null, listOf("g1f3", "(none)"))))
+        assertEquals("0000", board.moveText("0000"))
     }
 
     @Test fun castlingNeedsTheRightAndASafeKing() {
@@ -199,6 +230,48 @@ class CardLayoutTest {
         val mate = io.github.chessoverlay.engine.PvLine(1, 20, null, 2, "c6a8 d7c8 a8c8".split(" "))
         assertEquals(listOf("Qxa8+", "Bc8", "Qxc8#"), io.github.chessoverlay.overlay.CardLayer.san(
             Board.fromPlacement("r3kb2/p1pb1p1r/1pQp1B2/4P2p/8/2N5/PPP2PPP/R3KBNR"), mate))
+    }
+
+    @Test
+    fun theGamesNumbersFit() {
+        fun card(w: Float) = io.github.chessoverlay.overlay.CardLayer.build(
+            state.copy(moveNumber = 14, repetitions = 3), w, io.github.chessoverlay.overlay.CardStyle(),
+            io.github.chessoverlay.overlay.CardControls(), m, false)
+        fun info(c: io.github.chessoverlay.overlay.CardLayout) =
+            c.shapes.filterIsInstance<io.github.chessoverlay.overlay.Shape.Text>().first { it.text.startsWith("d22") }
+        // A wide card says it all ...
+        assertEquals("d22 ×3 14.", info(card(380f)).text)
+        // ... a narrow one the depth, and as much more as fits before the buttons.
+        assertEquals("d22", info(card(260f)).text)
+        for (w in listOf(260f, 320f, 380f)) {
+            val c = card(w)
+            // The depth never runs into the buttons, which keep their width.
+            assertTrue("the text runs into the buttons at $w", info(c).left >= c.hits.maxOf { it.x1 } - 0.01f)
+            assertTrue("a button is too narrow at $w", c.hits.all { it.x1 - it.x0 >= 28f - 0.01f })
+            for (s in c.shapes) if (s is io.github.chessoverlay.overlay.Shape.Text) {
+                assertTrue("'${s.text}' leaves a $w card", s.left >= 0f && s.left + s.width <= w + 0.5f)
+            }
+        }
+    }
+
+    @Test
+    fun whatTheEngineExpectedIsDrawnDimmed() {
+        val plain = state.copy(lines = listOf(io.github.chessoverlay.engine.PvLine(1, 20, 30, null, listOf("f1b5", "a7a6", "b5a4"))))
+        val expected = plain.copy(provisional = true)
+        fun fills(s: io.github.chessoverlay.overlay.OverlayState) =
+            io.github.chessoverlay.overlay.BoardLayer.build(s, io.github.chessoverlay.overlay.BoardStyle(arrows = 2, pathPlies = 2), m)
+                .filterIsInstance<io.github.chessoverlay.overlay.Shape.Poly>().map { it.fill ushr 24 }
+        // The same drawing, each shape at 55 %.
+        assertEquals(fills(plain).map { (it * 0.55f).toInt() }, fills(expected))
+        assertEquals(0xE6, fills(plain).last())
+        assertTrue(fills(expected).last() < 0x90)
+        // The card fades it, as it fades the last position's lines.
+        fun text(s: io.github.chessoverlay.overlay.OverlayState, t: String) =
+            io.github.chessoverlay.overlay.CardLayer.build(s, 380f, io.github.chessoverlay.overlay.CardStyle(),
+                io.github.chessoverlay.overlay.CardControls(), m, false).shapes
+                .filterIsInstance<io.github.chessoverlay.overlay.Shape.Text>().first { it.text == t }
+        assertEquals(0xFF, text(plain, "Bb5").color ushr 24)
+        assertTrue(text(expected, "Bb5").color ushr 24 < 0xFF)
     }
 
     @Test

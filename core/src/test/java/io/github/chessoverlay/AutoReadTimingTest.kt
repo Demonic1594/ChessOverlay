@@ -78,16 +78,39 @@ class AutoReadTimingTest {
 
     /** Polls every 30 ms from `from` to `to`; returns the times READ was decided. */
     private fun poll(w: ChangeWatcher, t: BoardTracker, from: Long, to: Long, glides: List<Glide>,
-                     arrow: List<Shape>? = null, cover: BoardTracker.Cover? = null): List<Long> {
+                     arrow: List<Shape>? = null, cover: BoardTracker.Cover? = null, step: Long = 30): List<Long> {
         val reads = ArrayList<Long>()
         val (xs, ys) = t.points()!!
         var now = from
         while (now <= to) {
             val px = BoardTracker.sample(screen(now, glides, arrow), xs, ys, 0, 0)
             if (w.offer(now, px, t, cover, 0) == ChangeWatcher.Decision.READ) reads += now
-            now += 30
+            now += step
         }
         return reads
+    }
+
+    /**
+     * In a fast game the overlay checks the board every 20 ms and reads
+     * once it has been still for 55 ms. A move must still never be read in
+     * flight, and lands sooner in the analysis.
+     */
+    @Test fun inAFastGameTheReadIsSoonerAndNeverInFlight() {
+        val t = BoardTracker()
+        val w = ChangeWatcher(stillMs = 55)
+        val e4 = start.copy().also { it.play("e2e4") }
+        val both = e4.copy().also { it.play("e7e5") }
+        // 1. e4 glides from 100 to 300 ms; 1... e5 from 900 to 1000 (a short animation, as sites draw quick ones).
+        val glides = listOf(Glide(start, "e2e4", 100, 200), Glide(e4, "e7e5", 900, 100))
+        t.accept(screen(0, glides), rec(start), null, strict = true)
+        val reads = poll(w, t, 0, 1400, glides, step = 20)
+        val first = reads.first()
+        assertTrue("read at $first: before the piece stopped (300 ms)", first >= 300)
+        assertTrue("read at $first: later than 300 + 55 + 20", first <= 375)
+        assertTrue("a read while the piece was in flight (900-1000 ms): $reads", reads.none { it in 901..1054 })
+        assertTrue("no read once the second move landed", reads.any { it in 1055..1075 })
+        // The capture taken at the first read shows the board as it stopped, and one in flight does not.
+        assertFalse(w.captureMatches(screen(950, glides), t))
     }
 
     @Test fun readsSoonAfterThePieceStopsAndNeverInFlight() {

@@ -17,6 +17,13 @@ data class OverlayState(
     val lastMove: MoveMark? = null,
     /** The move just played (UCI), when known: its squares are highlighted. */
     val playedMove: String? = null,
+    /** The number of the move to be played, when the game was followed from its start; else null. */
+    val moveNumber: Int? = null,
+    /** How many times this position came up in the game, itself included. */
+    val repetitions: Int = 1,
+    /** The lines are what the engine expected of this position, from its line for the one before (the move played began it):
+     *  shown dimmed until the search's own lines come. */
+    val provisional: Boolean = false,
 ) {
     companion object {
         /** Status while a new position waits for its first lines. */

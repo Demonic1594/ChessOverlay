@@ -6,9 +6,13 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * A small log the user can copy from the app (Settings -> Copy debug log):
+ * A small log the user can copy from the app (the tools: Copy the debug log):
  * the last few hundred lines in memory and on disk, so a crash on someone's
  * phone can be diagnosed without adb. Thread-safe.
+ *
+ * A message that keeps coming is written once and counted ("again, 40
+ * times"): an error at every board check (33 a second) would otherwise
+ * fill the log in seconds and spend the board checks writing it.
  */
 object DebugLog {
     private const val MAX_LINES = 600
@@ -16,6 +20,9 @@ object DebugLog {
     private val lines = ArrayDeque<String>()
     private var file: File? = null
     private val fmt = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
+    /** The last message written, without its time, and how often it came again since. */
+    private var last: String? = null
+    private var repeats = 0
 
     /** Log to `dir/debug.log` too (call once, e.g. with filesDir). */
     @Synchronized
@@ -38,7 +45,17 @@ object DebugLog {
 
     @Synchronized
     private fun add(level: String, tag: String, msg: String) {
-        val line = "${fmt.format(Date())} $level/$tag: $msg"
+        val key = "$level/$tag: $msg"
+        if (key == last) {
+            repeats++
+            return
+        }
+        flushRepeats()
+        write("${fmt.format(Date())} $key")
+        last = key
+    }
+
+    private fun write(line: String) {
         lines.addLast(line)
         while (lines.size > MAX_LINES) lines.removeFirst()
         try {
@@ -47,9 +64,17 @@ object DebugLog {
         }
     }
 
+    /** Writes how often the last message came again, when it did. */
+    private fun flushRepeats() {
+        if (repeats > 0) write("  (again, $repeats times)")
+        repeats = 0
+        last = null
+    }
+
     /** Everything kept: the previous file, the current file (or memory). */
     @Synchronized
     fun dump(): String {
+        flushRepeats()
         val f = file ?: return lines.joinToString("\n")
         val old = File(f.parentFile, "debug.log.1")
         val sb = StringBuilder()
@@ -61,6 +86,7 @@ object DebugLog {
     @Synchronized
     fun clear() {
         lines.clear()
+        last = null; repeats = 0
         file?.let { it.delete(); File(it.parentFile, "debug.log.1").delete() }
     }
 }

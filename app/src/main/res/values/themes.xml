@@ -20,6 +20,34 @@
         <item name="android:navigationBarColor">@color/bg</item>
         <item name="materialCardViewStyle">@style/Card</item>
         <item name="chipStyle">@style/ChoiceChip</item>
+        <item name="tonalButtonStyle">@style/TonalButton</item>
+        <item name="statusChipStyle">@style/StatusChip</item>
+    </style>
+
+    <!-- Where the theme says which style Rows.buttons gives its buttons, the status chips, and the icon buttons. -->
+    <attr name="tonalButtonStyle" format="reference" />
+    <attr name="statusChipStyle" format="reference" />
+
+    <!-- A round button with an icon only (Help, adding an engine). -->
+    <style name="IconButton" parent="Widget.AppCompat.ImageButton">
+        <item name="android:layout_width">40dp</item>
+        <item name="android:layout_height">40dp</item>
+        <item name="android:background">?attr/selectableItemBackgroundBorderless</item>
+        <item name="android:scaleType">centerInside</item>
+        <item name="tint">?attr/colorControlNormal</item>
+    </style>
+
+    <!-- What the overlay needs, as chips: done (a tick) or to do (a warning sign; tapping does it). -->
+    <style name="StatusChip" parent="Widget.Material3.Chip.Suggestion">
+        <item name="chipMinHeight">30dp</item>
+        <item name="chipStartPadding">6dp</item>
+        <item name="chipEndPadding">8dp</item>
+        <item name="chipIconSize">16dp</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="chipStrokeColor">@color/outline</item>
+        <item name="chipStrokeWidth">1dp</item>
+        <item name="chipBackgroundColor">@color/surface_high</item>
     </style>
 
     <style name="Card" parent="Widget.Material3.CardView.Filled">
@@ -27,6 +55,9 @@
         <item name="cardCornerRadius">18dp</item>
         <item name="contentPadding">16dp</item>
     </style>
+
+    <!-- The app's tonal buttons (Change, Options, and the rows Rows.buttons makes). -->
+    <style name="TonalButton" parent="Widget.Material3.Button.TonalButton" />
 
     <style name="ChoiceChip" parent="Widget.Material3.Chip.Filter">
         <item name="chipMinTouchTargetSize">40dp</item>

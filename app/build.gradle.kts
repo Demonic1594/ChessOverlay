@@ -3,6 +3,12 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// The project's signing key when it is configured: a Gradle property
+// (-PsigningStoreFile=..., see docs/development.md) or an environment variable.
+fun signingValue(property: String, variable: String): String? =
+    (project.findProperty(property) as String?)?.takeIf { it.isNotBlank() }
+        ?: System.getenv(variable)?.takeIf { it.isNotBlank() }
+
 android {
     namespace = "io.github.chessoverlay"
     compileSdk = 35
@@ -32,10 +38,20 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Sideloaded builds: signed with the debug keystore. CI configures
-            // no other, so every run makes a new key and its APK does not
-            // install over an older CI build (README, Builds).
-            signingConfig = signingConfigs.getByName("debug")
+            // Sideloaded builds. Signed with the project key when its four values
+            // are given (CI keeps them as secrets, for main and runs by hand), so
+            // that a newer build installs over an older one; otherwise with the
+            // debug keystore, which every build machine makes for itself.
+            val key = signingValue("signingStoreFile", "SIGNING_STORE_FILE")?.let { store ->
+                signingConfigs.create("project") {
+                    storeFile = file(store)
+                    storePassword = signingValue("signingStorePassword", "SIGNING_STORE_PASSWORD")
+                    keyAlias = signingValue("signingKeyAlias", "SIGNING_KEY_ALIAS")
+                    keyPassword = signingValue("signingKeyPassword", "SIGNING_KEY_PASSWORD")
+                    storeType = "PKCS12"
+                }
+            }
+            signingConfig = key ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {
@@ -77,6 +93,10 @@ dependencies {
     // JVM unit tests run the recognizer on the desktop ONNX Runtime.
     testImplementation("com.microsoft.onnxruntime:onnxruntime:1.20.0")
 }
+
+// The benchmark of board reading (tools/bench, BenchTest) keeps its pictures
+// in memory: 200 of them, most the size of a phone screen.
+tasks.withType<Test>().configureEach { maxHeapSize = "3g" }
 
 // The Android ONNX Runtime has the same classes as the desktop one; keep it
 // off the JVM unit-test classpath.

@@ -201,4 +201,14 @@ class RectCover(private val x0: Int, private val y0: Int, private val x1: Int, p
 
 internal fun Int.withAlpha(a: Int): Int = (this and 0xFFFFFF) or (a shl 24)
 
+/** The shape this much less opaque: a drawing that is only what the engine expected. */
+fun Shape.alphaScaled(f: Float): Shape = when (this) {
+    is Shape.Poly -> Shape.Poly(pts, fill.scaled(f), stroke.scaled(f), strokeWidth)
+    is Shape.Circle -> Shape.Circle(cx, cy, r, fill.scaled(f), stroke.scaled(f), strokeWidth)
+    is Shape.Box -> Shape.Box(x0, y0, x1, y1, radius, fill.scaled(f), stroke.scaled(f), strokeWidth)
+    is Shape.Text -> Shape.Text(x, y, text, size, color.scaled(f), bold, align, width)
+}
+
+private fun Int.scaled(f: Float): Int = (this and 0xFFFFFF) or ((((this ushr 24) * f).toInt()).coerceIn(0, 255) shl 24)
+
 internal fun near(a: Float, b: Float, eps: Float) = abs(a - b) <= eps
