@@ -2,6 +2,7 @@ package io.github.chessoverlay
 
 import io.github.chessoverlay.vision.Img
 import io.github.chessoverlay.vision.Recognizer
+import io.github.chessoverlay.vision.RecognizerMode
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -19,15 +20,7 @@ import kotlin.math.abs
 class VisionTest {
     /** Test images: gzipped "W H\n" + raw RGB bytes (made from PNGs with Pillow). */
     private fun load(name: String): Img {
-        val bytes = GZIPInputStream(javaClass.getResourceAsStream("/vision/${name.removeSuffix(".png")}.rgb.gz")!!).readBytes()
-        val nl = bytes.indexOf('\n'.code.toByte())
-        val (w, h) = String(bytes, 0, nl).split(' ').map { it.toInt() }
-        val img = Img(w, h)
-        for (i in 0 until w * h) {
-            val o = nl + 1 + 3 * i
-            img.px[i] = ((bytes[o].toInt() and 0xff) shl 16) or ((bytes[o + 1].toInt() and 0xff) shl 8) or (bytes[o + 2].toInt() and 0xff)
-        }
-        return img
+        return Img.fromRgb(GZIPInputStream(javaClass.getResourceAsStream("/vision/${name.removeSuffix(".png")}.rgb.gz")!!).readBytes())
     }
 
     @Test fun resizeMatchesPillow() {
@@ -52,7 +45,7 @@ class VisionTest {
         val dir = System.getenv("MODELS")
         assumeTrue("set MODELS to run this test", dir != null && File(dir, "board.onnx").exists())
         val expected = JSONObject(javaClass.getResourceAsStream("/vision/expected.json")!!.bufferedReader().readText())
-        Recognizer(File(dir, "board.onnx"), File(dir, "locator.onnx"), threads = 4).use { rec ->
+        Recognizer(File(dir, "board.onnx"), File(dir, "locator.onnx"), RecognizerMode(RecognizerMode.CPU, 4)).use { rec ->
             for (name in expected.keys()) {
                 val e = expected.getJSONObject(name)
                 val r = rec.recognise(load("$name.png"))

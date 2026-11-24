@@ -23,10 +23,12 @@ import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import java.util.zip.GZIPInputStream
 import io.github.chessoverlay.DebugCapture
 import io.github.chessoverlay.DebugLog
 import io.github.chessoverlay.MainActivity
 import io.github.chessoverlay.Prefs
+import io.github.chessoverlay.engine.EngineCheck
 import io.github.chessoverlay.engine.EngineHost
 import io.github.chessoverlay.engine.EngineRegistry
 import io.github.chessoverlay.vision.BoardTracker
@@ -34,6 +36,8 @@ import io.github.chessoverlay.vision.ChangeWatcher
 import io.github.chessoverlay.vision.Img
 import io.github.chessoverlay.vision.ModelStore
 import io.github.chessoverlay.vision.Recognizer
+import io.github.chessoverlay.vision.RecognizerMode
+import io.github.chessoverlay.vision.Tuner
 
 /**
  * The overlay: reads the screen, follows the board, runs the engine and
@@ -195,18 +199,19 @@ class OverlayService : Service() {
         if (!models.ready) { postState(OverlayState(status = "Download the recognition models in the app first")); return }
         postState(OverlayState(status = "Loading the recognizer…"))
         models.prepare()
-        val rec = Recognizer(models.board, models.locator, threads = 2)
-        recognizer = rec
         val reg = EngineRegistry(this)
         val all = reg.all()
         val info = all.firstOrNull { it.id == prefs.engineId } ?: all.firstOrNull()
         if (info == null) { postState(OverlayState(status = "No engine installed")); return }
-        lateinit var a: Analyst
+        // Until the analyst exists (the engine may be started to measure recognition first), the engine's news is not for anyone.
+        var ready: Analyst? = null
         val host = EngineHost(info.file, reg.workDir, prefs.engineOptions(info.id),
-            onUpdate = { u -> a.onEngine(u) },
-            onStatus = { s -> a.status(s) })
+            onUpdate = { u -> ready?.onEngine(u) },
+            onStatus = { s -> ready?.status(s) })
         engine = host
-        a = Analyst(rec, host) { st -> postState(st) }.apply {
+        val rec = Recognizer(models.board, models.locator, howToRead(models, host))
+        recognizer = rec
+        val a = Analyst(rec, host) { st -> postState(st) }.apply {
             lines = prefs.lines
             thinkMs = prefs.thinkMs.toLong()
             minConfidence = prefs.minConfidence
@@ -215,10 +220,40 @@ class OverlayService : Service() {
             pathPlies = prefs.pathPlies
         }
         analyst = a
+        ready = a
         host.start()
         DebugLog.i(TAG, "ready: ${info.title}, ${prefs.lines} lines, think ${prefs.thinkMs} ms")
         postState(OverlayState(status = if (prefs.autoStart) "Looking for a board…" else "Tap ▶ to read the screen, A for auto mode"))
         main.post { if (prefs.autoStart && !auto) toggleAuto() }
+    }
+
+    /**
+     * How the models are run on this phone (see Tuner): measured once, the
+     * first time the overlay starts, with the engine searching as it will be
+     * then, and kept. When measuring fails, the default is used.
+     */
+    private fun howToRead(models: ModelStore, host: EngineHost): RecognizerMode {
+        val saved = RecognizerMode.parse(prefs.recognizerMode)
+        if (prefs.recognizerTuned) return saved
+        postState(OverlayState(status = "Measuring how to read fastest (once)…"))
+        try {
+            val sample = Tuner.sample(assets.open(Tuner.SAMPLE))
+            host.start()
+            host.analyse(EngineCheck.FEN, 3, 0)
+            SystemClock.sleep(800)   // until the engine searches
+            val result = Tuner.tune(models.board, models.locator, sample, progress = { i, n ->
+                postState(OverlayState(status = "Measuring how to read fastest (once): $i of $n…"))
+            })
+            prefs.recognizerMode = result.chosen.toString()
+            prefs.recognizerTuned = true
+            DebugLog.i(TAG, "recognition measured:\n${result.report()}")
+            return result.chosen
+        } catch (e: Throwable) {
+            DebugLog.e(TAG, "could not measure recognition; $saved is used", e)
+            return saved
+        } finally {
+            host.stop()
+        }
     }
 
     private fun boardStyle() = BoardStyle(prefs.arrows, prefs.pathPlies, prefs.arrowLabels, density)

@@ -2,6 +2,7 @@ package io.github.chessoverlay.vision
 
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
+import ai.onnxruntime.OrtException
 import ai.onnxruntime.OrtSession
 import java.io.File
 import java.nio.FloatBuffer
@@ -12,17 +13,85 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
+ * How the models are run: by ONNX Runtime's own code on the CPU with
+ * `threads` threads, or by XNNPACK or NNAPI (the Android build of ONNX
+ * Runtime has both). Which is fastest differs per phone; [Tuner] measures.
+ * [toString] is the saved form, as "cpu:2".
+ */
+class RecognizerMode(val provider: String = CPU, val threads: Int = DEFAULT_THREADS) {
+
+    /** Sets this on `opts`; throws IllegalArgumentException when it is not available in this ONNX Runtime. */
+    fun applyTo(opts: OrtSession.SessionOptions) {
+        try {
+            when (provider) {
+                CPU -> opts.setIntraOpNumThreads(threads)
+                XNNPACK -> {
+                    opts.setIntraOpNumThreads(threads)
+                    opts.addXnnpack(mapOf("intra_op_num_threads" to threads.toString()))
+                }
+                NNAPI -> {
+                    opts.setIntraOpNumThreads(threads)
+                    opts.addNnapi()
+                }
+                else -> throw IllegalArgumentException("no such provider: $provider")
+            }
+        } catch (e: OrtException) {
+            throw unavailable(e)
+        } catch (e: LinkageError) {   // an older ONNX Runtime, or one without the provider
+            throw unavailable(e)
+        }
+    }
+
+    private fun unavailable(e: Throwable) = IllegalArgumentException("$this is not available here: ${e.message}", e)
+
+    override fun toString() = "$provider:$threads"
+
+    companion object {
+        const val CPU = "cpu"
+        const val XNNPACK = "xnnpack"
+        const val NNAPI = "nnapi"
+        const val DEFAULT_THREADS = 2
+
+        /** Two threads of ONNX Runtime's own code: what is used until the phone has been measured. */
+        val DEFAULT = RecognizerMode(CPU, DEFAULT_THREADS)
+
+        /** From [toString]'s form; `fallback` when it is not one. */
+        fun parse(text: String?, fallback: RecognizerMode = DEFAULT): RecognizerMode {
+            val parts = text?.split(":") ?: return fallback
+            if (parts.size != 2) return fallback
+            val threads = parts[1].toIntOrNull() ?: return fallback
+            if (threads < 1) return fallback
+            return RecognizerMode(parts[0], threads)
+        }
+    }
+}
+
+/**
  * Chess board recognition: a Kotlin port of chessimg2pos v2 (MIT, Mattia
  * Dicio, github.com/mdicio/chessimg2pos), using its ONNX models:
  * locator.onnx finds the board's corners (two passes: whole image, then a
  * crop around the first guess); board.onnx classifies the 64 squares and the
  * orientation; a legality step fixes impossible boards on uncertain squares.
+ *
+ * Most of the time of a read is the board model's. [lastTiming] says where
+ * the last read's time went, and [Tuner] finds the fastest [RecognizerMode].
  */
-class Recognizer(boardModel: File, locatorModel: File, threads: Int = 2) : AutoCloseable {
+class Recognizer(boardModel: File, locatorModel: File, val mode: RecognizerMode = RecognizerMode.DEFAULT) : AutoCloseable {
     private val env = OrtEnvironment.getEnvironment()
-    private val opts = OrtSession.SessionOptions().apply { setIntraOpNumThreads(threads) }
+    private val opts = OrtSession.SessionOptions().also { o ->
+        try {
+            mode.applyTo(o)
+        } catch (e: Exception) {
+            o.close()
+            throw e
+        }
+    }
     private val board = env.createSession(boardModel.absolutePath, opts)
     private val locator = env.createSession(locatorModel.absolutePath, opts)
+
+    /** Where the time of the last read went, for the log. */
+    var lastTiming = ""
+        private set
 
     override fun close() {
         board.close(); locator.close(); opts.close()
@@ -31,37 +100,16 @@ class Recognizer(boardModel: File, locatorModel: File, threads: Int = 2) : AutoC
     /** Find the board and read it. With `knownCorners` (the board has not
      *  moved on screen) the locator is skipped: one model run instead of three. */
     fun recognise(img: Img, legality: Boolean = true, knownCorners: List<FloatArray>? = null): Recognition {
+        val t0 = System.nanoTime()
         val corners = knownCorners ?: locate(img)
-        val input = boardInput(img, corners)
-        val x = FloatArray(3 * BOARD_SIZE * BOARD_SIZE)
-        input.toTensor(x)
-        OnnxTensor.createTensor(env, FloatBuffer.wrap(x), longArrayOf(1, 3, BOARD_SIZE.toLong(), BOARD_SIZE.toLong())).use { t ->
-            board.run(mapOf("board" to t)).use { out ->
-                @Suppress("UNCHECKED_CAST")
-                val sq = (out[0].value as Array<Array<FloatArray>>)[0]
-                @Suppress("UNCHECKED_CAST")
-                val ori = (out[1].value as Array<FloatArray>)[0]
-                val probs = Array(64) { softmax(sq[it]) }
-                val oriP = softmax(ori)
-                val (idx, changed) = if (legality) Legality.fix(probs) else Pair(IntArray(64) { Fen.argmax(probs[it]) }, 0)
-                val drawn = Fen.fromIndices(idx)
-                // Which way round: the model, checked against the position (see Orientation).
-                val black = if (legality) Orientation.decide(drawn, oriP[1]) else oriP[1] > 0.5f
-                var conf = 1f
-                for (i in 0 until 64) conf = min(conf, probs[i][idx[i]])
-                return Recognition(
-                    placement = Orientation.whiteView(drawn, black),
-                    blackAtBottom = black,
-                    confidence = conf,
-                    orientationConfidence = if (black) oriP[1] else oriP[0],
-                    corners = corners,
-                    legalityChanges = changed,
-                    drawn = drawn,
-                    drawnProbs = probs.toList(),
-                    blackBottomP = oriP[1],
-                )
-            }
-        }
+        val input = input(boardInput(img, corners))
+        val t1 = System.nanoTime()
+        val out = runBoard(env, board, input)
+        val t2 = System.nanoTime()
+        val r = interpret(out, corners, legality)
+        val t3 = System.nanoTime()
+        lastTiming = "${if (knownCorners == null) "find " else ""}prepare ${ms(t0, t1)} ms, model ${ms(t1, t2)} ms, rest ${ms(t2, t3)} ms"
+        return r
     }
 
     /** Board corners (TL, TR, BR, BL) in image pixels. */
@@ -169,5 +217,51 @@ class Recognizer(boardModel: File, locatorModel: File, threads: Int = 2) : AutoC
             }
             return DoubleArray(8) { a[it][8] / a[it][it] }
         }
+
+        /** The classifier's input for a board image of BOARD_SIZE x BOARD_SIZE. */
+        fun input(img: Img): FloatArray {
+            val x = FloatArray(3 * BOARD_SIZE * BOARD_SIZE)
+            img.toTensor(x)
+            return x
+        }
+
+        /** What the board model says about its input: each square's class scores (64 x 13), and the orientation's. */
+        class BoardOutput(val squares: Array<FloatArray>, val orientation: FloatArray)
+
+        fun runBoard(env: OrtEnvironment, session: OrtSession, x: FloatArray): BoardOutput =
+            OnnxTensor.createTensor(env, FloatBuffer.wrap(x), longArrayOf(1, 3, BOARD_SIZE.toLong(), BOARD_SIZE.toLong())).use { t ->
+                session.run(mapOf("board" to t)).use { out ->
+                    @Suppress("UNCHECKED_CAST")
+                    val sq = (out[0].value as Array<Array<FloatArray>>)[0]
+                    @Suppress("UNCHECKED_CAST")
+                    val ori = (out[1].value as Array<FloatArray>)[0]
+                    BoardOutput(sq, ori)
+                }
+            }
+
+        /** The reading from the board model's output: probabilities, the legality step, and which way round. */
+        fun interpret(out: BoardOutput, corners: List<FloatArray>, legality: Boolean): Recognition {
+            val probs = Array(64) { softmax(out.squares[it]) }
+            val oriP = softmax(out.orientation)
+            val (idx, changed) = if (legality) Legality.fix(probs) else Pair(IntArray(64) { Fen.argmax(probs[it]) }, 0)
+            val drawn = Fen.fromIndices(idx)
+            // Which way round: the model, checked against the position (see Orientation).
+            val black = if (legality) Orientation.decide(drawn, oriP[1]) else oriP[1] > 0.5f
+            var conf = 1f
+            for (i in 0 until 64) conf = min(conf, probs[i][idx[i]])
+            return Recognition(
+                placement = Orientation.whiteView(drawn, black),
+                blackAtBottom = black,
+                confidence = conf,
+                orientationConfidence = if (black) oriP[1] else oriP[0],
+                corners = corners,
+                legalityChanges = changed,
+                drawn = drawn,
+                drawnProbs = probs.toList(),
+                blackBottomP = oriP[1],
+            )
+        }
+
+        private fun ms(from: Long, to: Long) = (to - from) / 1_000_000
     }
 }

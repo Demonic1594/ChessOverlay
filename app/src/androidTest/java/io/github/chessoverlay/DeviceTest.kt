@@ -26,6 +26,7 @@ import io.github.chessoverlay.overlay.MoveMark
 import io.github.chessoverlay.overlay.OverlayState
 import io.github.chessoverlay.vision.Img
 import io.github.chessoverlay.vision.Recognizer
+import io.github.chessoverlay.vision.Tuner
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -113,7 +114,8 @@ class DeviceTest {
         assertTrue("the launcher icon is not an adaptive icon", icon is android.graphics.drawable.AdaptiveIconDrawable)
         val adaptive = icon as android.graphics.drawable.AdaptiveIconDrawable
         icon.setBounds(0, 0, 432, 432)
-        val circle = android.graphics.Path().apply { addCircle(216f, 216f, 144f, android.graphics.Path.Direction.CW) }
+        // The system's own mask is applied by the drawable; for the monochrome layer, drawn by hand below, a circle of the size a launcher's mask has stands in.
+        val circle = android.graphics.Path().apply { addCircle(216f, 216f, 216f, android.graphics.Path.Direction.CW) }
         fun png(name: String, size: Int, wallpaper: Int, draw: (Canvas) -> Unit) {
             val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
             val c = Canvas(bmp)
@@ -122,12 +124,7 @@ class DeviceTest {
             storage.openOutputFile(name).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
         for ((name, paper) in listOf("icon.png" to Color.rgb(0xE9, 0xEC, 0xEF), "icon_dark.png" to Color.rgb(0x17, 0x1A, 0x1F))) {
-            png(name, 432, paper) { c ->
-                c.save()
-                c.clipPath(circle)
-                icon.draw(c)
-                c.restore()
-            }
+            png(name, 432, paper) { icon.draw(it) }
         }
         // The foreground alone: the whole 108 x 108 it is drawn on.
         png("icon_layer.png", 540, Color.rgb(0x1B, 0x24, 0x33)) { c ->
@@ -197,6 +194,24 @@ class DeviceTest {
                 assertTrue("no engine lines; state $state", got.await(30, TimeUnit.SECONDS))
             }
             storage.openOutputFile("timing.txt").use { it.write("recognition $ms ms\n".toByteArray()) }
+        }
+    }
+
+    /**
+     * The tuner on Android's ONNX Runtime, which has XNNPACK and NNAPI: every
+     * way that runs reads the sample as the default does, and the way it keeps
+     * reads it right. The table is written out (tuning.txt).
+     */
+    @Test fun recognizerIsMeasuredOnAndroid() {
+        assumeTrue("models not pushed to $models", File(models, "board.onnx").exists())
+        val result = Tuner.tune(File(models, "board.onnx"), File(models, "locator.onnx"), image("screen1"), warmUps = 2, runs = 5)
+        DebugLog.i("DeviceTest", "recognition measured:\n${result.report()}")
+        storage.openOutputFile("tuning.txt").use { it.write(result.report().toByteArray()) }
+        assertEquals("8/8/8/4p1K1/2k1P3/8/8/8", result.reading.placement)
+        for (t in result.timings) assertTrue("$t.mode: it ran but read differently", t.error != null || t.agreed == true)
+        assertTrue("the default did not run", result.timings.any { it.mode == io.github.chessoverlay.vision.RecognizerMode.DEFAULT && it.usable })
+        Recognizer(File(models, "board.onnx"), File(models, "locator.onnx"), result.chosen).use { rec ->
+            assertEquals("8/8/8/4p1K1/2k1P3/8/8/8", rec.recognise(image("screen1")).placement)
         }
     }
 

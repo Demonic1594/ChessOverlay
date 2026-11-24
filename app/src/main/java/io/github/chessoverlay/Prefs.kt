@@ -73,6 +73,16 @@ class Prefs(ctx: Context) {
         get() = p.getFloat("min_conf", 0.5f)
         set(v) = p.edit().putFloat("min_conf", v.coerceIn(0f, 1f)).apply()
 
+    /** How the overlay runs the recognition models (see RecognizerMode.toString), as the phone was measured. */
+    var recognizerMode: String?
+        get() = p.getString("recognizer_mode", null)
+        set(v) = p.edit().putString("recognizer_mode", v).apply()
+
+    /** Whether the models were measured on this phone (once; "Test recognition" measures again). */
+    var recognizerTuned: Boolean
+        get() = p.getBoolean("recognizer_tuned", false)
+        set(v) = p.edit().putBoolean("recognizer_tuned", v).apply()
+
     fun engineOptions(engineId: String): Map<String, String> {
         val prefix = "$engineId\u0000"
         return engines.all.filterKeys { it.startsWith(prefix) }

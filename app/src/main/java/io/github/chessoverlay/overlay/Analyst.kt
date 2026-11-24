@@ -163,7 +163,8 @@ class Analyst(
             return Look.FAILED
         }
         val ms = (System.nanoTime() - t0) / 1_000_000
-        DebugLog.i(TAG, "read ${if (located) "after locating" else "at known corners"} ($changed squares changed) in $ms ms: " +
+        DebugLog.i(TAG, "read ${if (located) "after locating" else "at known corners"} ($changed squares changed) in $ms ms " +
+            "[${recognizer.lastTiming}]: " +
             "${rec.placement} ${if (rec.blackAtBottom) "black" else "white"} at bottom, sure ${(rec.confidence * 100).toInt()}%, " +
             "corners ${rec.corners.joinToString(" ") { "${it[0].toInt()},${it[1].toInt()}" }}")
         if (rec.confidence < minConfidence && !located) {

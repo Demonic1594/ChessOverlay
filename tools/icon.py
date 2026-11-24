@@ -16,14 +16,15 @@ import sys
 
 RES = pathlib.Path(__file__).resolve().parent.parent / "app/src/main/res"
 
-# The adaptive icon's canvas is 108 x 108; what matters must be inside the
-# circle of diameter 66 about the centre.
-BOARD = (26.0, 26.0, 56.0, 13.0)       # x, y, side, corner radius
+# The adaptive icon's layers are 108 x 108. A launcher shows the middle of them
+# (about 86 of the 108 across, the shape of its mask); what matters must be
+# inside the circle of diameter 66 about the centre.
+BOARD = (24.0, 24.0, 60.0, 18.0)       # x, y, side, corner radius
 SQUARE = BOARD[2] / 4
 LIGHT, DARK = "#F2F3D8", "#5E9C4C"
 ARROW, ARROW_EDGE = "#3B8BEB", "#0B0F16"
-TAIL, TIP = (33.0, 75.0), (75.0, 33.0)
-SHAFT, HEAD_LEN, HEAD = 3.8, 15.5, 9.0
+TAIL, TIP = (32.0, 76.0), (76.0, 32.0)
+SHAFT, HEAD_LEN, HEAD = 4.0, 16.0, 9.5
 EDGE = 2.4                            # the arrow's outline, on each side
 BG_TOP, BG_BOTTOM = "#1B2433", "#0F1113"
 
@@ -170,12 +171,12 @@ def preview(path):
     c.line(pts + [pts[0]], fill=ARROW_EDGE, width=round(EDGE * 2 * scale), joint="curve")
     c.polygon(pts, fill=ARROW)
 
-    # As a launcher shows it: the round mask, 72 of the 108, on a light and on a
-    # dark wallpaper at three sizes; and the monochrome layer as a themed icon.
+    # As a launcher shows it: a round mask over the middle 86.4 of the 108, on a
+    # light and on a dark wallpaper at three sizes; and the monochrome layer as a themed icon.
     def masked(layer: Image.Image) -> Image.Image:
         icon = layer.resize((108 * 4, 108 * 4), Image.LANCZOS)
         mask = Image.new("L", icon.size, 0)
-        d = 72 * 4
+        d = round(86.4 * 4)
         ImageDraw.Draw(mask).ellipse([(icon.width - d) // 2, (icon.height - d) // 2,
                                       (icon.width + d) // 2, (icon.height + d) // 2], fill=255)
         out = Image.new("RGBA", icon.size, (0, 0, 0, 0))

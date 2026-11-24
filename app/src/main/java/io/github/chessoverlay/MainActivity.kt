@@ -30,6 +30,7 @@ import io.github.chessoverlay.ui.CheckRow
 import io.github.chessoverlay.ui.PreviewBoardView
 import io.github.chessoverlay.ui.Rows
 import io.github.chessoverlay.vision.ModelStore
+import io.github.chessoverlay.vision.Tuner
 import kotlin.concurrent.thread
 
 /**
@@ -145,6 +146,9 @@ class MainActivity : AppCompatActivity() {
         r.action(R.drawable.ic_play, "Test the engine", "Runs it on a position for a few seconds, with your options, and says what it did.") {
             testEngine()
         }
+        r.action(R.drawable.ic_grid, "Test recognition",
+            "Reads a board each way of running the models and says how long each takes on this phone. " +
+                "The fastest that reads it right is kept, for the next time the overlay starts.") { testRecognition() }
         r.action(R.drawable.ic_copy, "Copy the debug log", "What the overlay saw and did: reads, engine starts and errors.") {
             getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("ChessOverlay log", DebugLog.dump()))
             toast("Debug log copied")
@@ -185,6 +189,38 @@ class MainActivity : AppCompatActivity() {
                             .setPrimaryClip(ClipData.newPlainText("ChessOverlay log", DebugLog.dump()))
                         toast("Debug log copied")
                     }
+                    .show()
+            }
+        }
+    }
+
+    private fun testRecognition() {
+        val models = ModelStore(this)
+        if (!models.ready) { toast("The recognition models are not here yet"); return }
+        val busy = MaterialAlertDialogBuilder(this)
+            .setTitle("Testing recognition")
+            .setMessage("Reading a board, each way of running the models…")
+            .setCancelable(false)
+            .show()
+        thread(name = "recognition-test") {
+            val report = try {
+                models.prepare()
+                val result = Tuner.tune(models.board, models.locator, Tuner.sample(assets.open(Tuner.SAMPLE)))
+                prefs.recognizerMode = result.chosen.toString()
+                prefs.recognizerTuned = true
+                DebugLog.i("Tuner", "recognition tested:\n${result.report()}")
+                result.report() + "\nThe overlay uses it from its next start."
+            } catch (ex: Exception) {
+                DebugLog.e("Tuner", "test failed", ex)
+                "The test failed: ${ex.message}"
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                busy.dismiss()
+                MaterialAlertDialogBuilder(this)
+                    .setTitle("Recognition")
+                    .setMessage(report)
+                    .setPositiveButton("OK", null)
                     .show()
             }
         }
