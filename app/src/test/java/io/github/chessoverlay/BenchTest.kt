@@ -8,7 +8,6 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.File
 import java.util.Random
-import javax.imageio.ImageIO
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -106,10 +105,5 @@ class BenchTest {
         assertTrue(report.toString(), shipped.right >= shipped.n * 50 / 100)
     }
 
-    private fun load(f: File): Img {
-        val b = ImageIO.read(f) ?: error("not an image: $f")
-        val img = Img(b.width, b.height)
-        for (y in 0 until b.height) for (x in 0 until b.width) img.px[y * b.width + x] = b.getRGB(x, y) and 0xFFFFFF
-        return img
-    }
+    private fun load(f: File): Img = Png.read(f.readBytes())
 }
