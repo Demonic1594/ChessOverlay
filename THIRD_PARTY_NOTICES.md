@@ -1,8 +1,16 @@
 # Third-party notices
 
-The app's own code has no licence file yet (README, Credits and licences).
-This page names what the APK contains that is not the app's own code, and
-the licence of each.
+The app's own code has no licence file yet (see the README, section
+*Licence*). This page names what the APK contains that is not the app's own
+code, and the licence of each.
+
+| Component | Used for | Licence |
+|---|---|---|
+| chessimg2pos v2 | Recognition: the models, and the method ported to Kotlin | MIT |
+| ONNX Runtime | Running the models | MIT |
+| Smotherfish (Stockfish) | The built-in engine | GPL-3.0 |
+| AndroidX, Material Components | The app's interface | Apache-2.0 |
+| Kotlin, kotlinx.coroutines | The app's code | Apache-2.0 |
 
 ## chessimg2pos
 

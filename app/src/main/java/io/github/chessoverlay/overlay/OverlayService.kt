@@ -55,7 +55,8 @@ import io.github.chessoverlay.vision.Tuner
  * the overlay showing (points under our own drawing are skipped, see
  * BoardTracker.Cover). When at least two squares differ from the last read
  * and the board has not moved for STILL_MS, it is read again on a clean
- * capture (the board layer hidden for one frame, once per move). A capture
+ * capture (the board layer is taken off when the read starts and kept off
+ * until the capture is taken). A capture
  * that does not match the still board it was taken for (a piece started
  * moving) is thrown away, so a piece in flight is never read. Misreads are
  * retried with a growing pause and never replace the analysis.
@@ -709,7 +710,7 @@ class OverlayService : Service() {
         /** The overlay is on (for the app's Start / Stop button). */
         @Volatile var running = false
             private set
-        /** The position the overlay saw last, for the app's Positions card; it stays after the overlay stops. */
+        /** The position the overlay saw last, for the app's position card; it stays after the overlay stops. */
         @Volatile var lastPosition: Analyst.Position? = null
             internal set
         private const val COPIED = "Position copied (FEN)"

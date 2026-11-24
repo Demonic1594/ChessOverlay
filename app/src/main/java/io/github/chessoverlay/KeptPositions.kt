@@ -7,7 +7,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Positions kept from the overlay (the app's Positions card): in the app's
+ * Positions kept from the overlay (the app's position card): in the app's
  * settings as JSON, to copy again or to share as text. At most [MAX]: a
  * position to come back to, not a database.
  */

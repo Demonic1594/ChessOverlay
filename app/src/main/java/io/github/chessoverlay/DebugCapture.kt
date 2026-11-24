@@ -8,7 +8,7 @@ import java.io.File
 /**
  * The last screen on which a board was read wrongly (twice in a row: a
  * misread, not a piece in flight), kept so it can be shared from the app
- * (Debug → Share the last misread screen) and the problem seen as the app
+ * (the tools: Share the last misread screen) and the problem seen as the app
  * saw it. A screen without a board is never kept: with the overlay on, that
  * is whatever else the user opened. At most one save every 20 seconds.
  */

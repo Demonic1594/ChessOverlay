@@ -6,7 +6,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * A small log the user can copy from the app (Settings -> Copy debug log):
+ * A small log the user can copy from the app (the tools: Copy the debug log):
  * the last few hundred lines in memory and on disk, so a crash on someone's
  * phone can be diagnosed without adb. Thread-safe.
  *

@@ -4,7 +4,7 @@ plugins {
 }
 
 // The project's signing key when it is configured: a Gradle property
-// (-PsigningStoreFile=..., see README, Builds) or an environment variable.
+// (-PsigningStoreFile=..., see docs/development.md) or an environment variable.
 fun signingValue(property: String, variable: String): String? =
     (project.findProperty(property) as String?)?.takeIf { it.isNotBlank() }
         ?: System.getenv(variable)?.takeIf { it.isNotBlank() }

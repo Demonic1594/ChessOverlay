@@ -6,7 +6,7 @@
 #   artifact. For pushes to main and runs by hand it is signed with the
 #   project key (secrets ANDROID_KEYSTORE_*), so that a newer build installs
 #   over an older one; a pull request's APK with the debug key of the build
-#   machine, a new one each run (README, Builds);
+#   machine, a new one each run (docs/development.md, Signing in CI);
 # - engine-arm64: the engine from that APK on real arm64 hardware, run by the
 #   app's own engine code;
 # - device: the app on an x86_64 emulator, with an x86_64 Smotherfish.

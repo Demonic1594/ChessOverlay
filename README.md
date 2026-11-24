@@ -1,298 +1,264 @@
-# ChessOverlay
+<p align="center">
+  <img src="docs/images/icon.png" width="128" height="128" alt="ChessOverlay icon">
+</p>
 
-An Android app that reads a chess board from your screen, in any app, runs a
-chess engine on it, and draws the result over the board: arrows for the best
-moves, the best line's next moves, a grade for the move just played, and a
-floating card with the evaluation and the engine's lines.
+<h1 align="center">ChessOverlay</h1>
 
-Typical use: analyse your own games wherever they are (game archives in
-other apps, videos, puzzles, books, screenshots), and collect positions.
+<p align="center">Live chess engine analysis drawn over any chess board on your Android screen.</p>
 
-## Fair play: your responsibility
+<p align="center">
+  <a href="https://github.com/Demonic1594/ChessOverlay/actions/workflows/build.yml"><img alt="Build status" src="https://github.com/Demonic1594/ChessOverlay/actions/workflows/build.yml/badge.svg"></a>
+  <img alt="Android 8.0 or later" src="https://img.shields.io/badge/Android-8.0%2B-3ddc84">
+  <img alt="arm64-v8a" src="https://img.shields.io/badge/CPU-arm64--v8a-blue">
+  <img alt="No licence yet" src="https://img.shields.io/badge/licence-none%20yet-lightgrey">
+</p>
 
-ChessOverlay is an analysis tool and has no built-in limits on where it
-runs. How you use it is up to you, and so are the consequences.
+<p align="center">
+  <a href="#features">Features</a> &middot;
+  <a href="#getting-started">Getting started</a> &middot;
+  <a href="#usage">Usage</a> &middot;
+  <a href="docs/how-it-works.md">How it works</a> &middot;
+  <a href="#development">Development</a> &middot;
+  <a href="#licence">Licence</a>
+</p>
 
-Using engine assistance during a live game against another person is
-cheating. It breaks the fair-play rules of Chess.com, Lichess and every
-other chess site and over-the-board event, and they detect it and close
-accounts for it. The authors do not support that use and are not
-responsible for any penalty, ban or other consequence of misusing this app.
+| Middlegame: three lines, the best line's next moves numbered, the last move graded | Black to move: knight moves bend like an L so they cross no other piece |
+|---|---|
+| <img src="docs/images/overlay-middlegame.png" alt="The floating card and the arrows over a board in a middlegame" width="390"> | <img src="docs/images/overlay-black.png" alt="The floating card and the arrows over a board with Black at the bottom" width="390"> |
 
-## Features (v1)
+## Overview
 
-- **Board recognition** from the screen: finds the board anywhere on screen,
-  reads all 64 squares and which side is at the bottom. Kotlin port of
-  [chessimg2pos](https://github.com/mdicio/chessimg2pos) v2 (MIT) on ONNX
-  Runtime. The models are built into the APK, the board model quantized to
-  int8 (`tools/quantize_models.py`): the same reading as the original on
-  every square of 300 benchmark boards, about twice as fast, 38 MB instead
-  of 125 MB. (A build without them downloads the originals once.) The
-  locator's corners are rarely exact, and now and then they miss a file or
-  a rank of the board, so a located board is sharpened to its own edges
-  first (`BoardEdges`: on lines across each side, where the picture stops
-  being the page around the board; a side that was missed is looked for
-  further out, and one with no page beyond it, as on a phone, is taken
-  from the board's being square). On 200 boards as lichess shows them
-  (`tools/bench`), that reads 197 where the locator's own corners read
-  180; of the other three, one's orientation the model gets wrong at exact
-  corners too, and two had a tilted box from the locator.
-- **Reading speed, measured on the phone**: most of the time of a read is
-  the board model's, and which way of running it is fastest differs per
-  phone. The first time the overlay starts, it times a read of a board
-  with one, two and four threads of ONNX Runtime's own CPU code, with the
-  engine searching as it will be then, and keeps the fastest that reads
-  the board as the default does. The tools' Test recognition also
-  tries XNNPACK and NNAPI (other code: a provider's own, a phone's
-  driver), shows the table and keeps the fastest that reads it right;
-  should the app then die while reading, it goes back to the default.
-- **Reading in the light of the game**: during a game a new position can
-  only follow the last one by a move, or a move each, so the most likely
-  position the game can reach is taken when the picture allows it (a piece
-  hidden under a site's arrow, or misread, cannot vanish or turn into
-  another piece). Which way round the board is drawn comes from the model
-  checked against the position (pawns and kings stay near their own side);
-  a board turned round, by hand or by a site that turns it after every
-  move, is the same game; the start position has White to move whichever
-  side is at the bottom; turning the phone finds the board again at the new
-  screen size. A new board theme mid-game (every square changes colour,
-  no piece moves) is read once and the game goes on; a rematch with the
-  sides swapped starts a new game the right way round. On benchmarks of 30
-  games each: with site arrows and highlights over pieces 930 of 930
-  positions right (904 without this); with themes switched mid-game, games
-  in brown, blue, grey and purple, and rematches with sides swapped, 930 of
-  930.
-- **Engines**: Smotherfish built in (Stockfish-based); any arm64 UCI engine
-  binary you add (Stockfish, Komodo, lc0 with a Maia network set as its
-  `WeightsFile`, …); and engine apps that offer engines to chess GUIs (the
-  Open Exchange protocol that DroidFish uses).
-- **Engine options**: every UCI option the engine declares can be edited,
-  including `UCI_LimitStrength` / `UCI_Elo` and Smotherfish's
-  `Analysis Elo` and `Smother*` options.
-- **On the board, only arrows**: the best move as one bold blue arrow, the
-  next best lines as thin ones in their own colours (knight moves bend like
-  an L); the best line's next moves as slim arrows in the colour of the side
-  that plays them, numbered in a small disc in a corner of the destination
-  square, each side counted on its own (White's 1, 2, 3 … in white discs,
-  Black's in dark ones); the last move graded in the opposite corner (best
-  ★, good ✓, inaccuracy ?!, mistake ?, blunder ??, Lichess's thresholds).
-- **Floating card** with everything else: the buttons, the score (White's
-  view) and an evaluation bar, the side to move and depth, and one row per
-  engine line in short algebraic notation (checks, mates, disambiguation)
-  whose colour chip matches its arrow. It sits next to the board on its own;
-  drag it anywhere, tap the lines to fold them.
-- **Auto mode** (on by default) follows the screen without flicker: about
-  33 times a second it compares 49 points per square with the last read,
-  with the overlay showing (points under its own drawing are skipped). When
-  at least two squares changed and the board has been still for 80 ms it
-  reads the board (hiding the arrows for one frame, once per move); a
-  capture that no longer matches the still board (a piece started gliding)
-  is thrown away, so pieces are never read in flight. It works out the
-  exact move played, or both moves when the reply came first, and so the
-  side to move. A small change that no move explains must be read the same
-  way twice; misreads never replace the analysis. The game is kept while the
-  board is away (a notification, another app) and goes on when it is back.
-- **Fast enough for bullet**: the squares that changed, and the legal moves,
-  usually leave exactly one move (or a move and the reply that came with
-  it, a premove) that explains them, including the site's last-move
-  highlight going away and a check highlight. That move is analysed the
-  moment the board is still, within a few milliseconds and before the board
-  recognizer runs; the arrows come back as soon as the clean capture is
-  taken, and the recognizer then checks the move on it and corrects it if
-  it was wrong (logged). When no single move explains the change, the
-  recognizer decides, as before. In a fast game (four moves timed and a
-  median 1.5 s or less between them) the board is checked every 20 ms
-  instead of 30 and read once it has been still for 55 ms instead of
-  80, and the first lines are shown from depth 4, or shallower ones
-  after 40 ms.
-- **A game is remembered**: in a game the overlay follows move by move,
-  the moves are kept. A king or rook that has moved cannot castle any
-  more (a rook taken on its square, or one that arrives there later,
-  does not bring the right back), so the engine is never offered
-  castling it does not have; after a pawn's double step it is told the
-  square a capture en passant could land on. Castling out of check, or
-  across an attacked square, is not taken for a legal move, so a
-  checkmate with the king and a rook still on their squares is said on
-  the card instead of leaving it on "Analysing…".
-- **Positions to take along**: a finger kept on the floating card copies
-  the position's FEN. The app's position card shows the last position the
-  overlay saw, its FEN and the engine's line: copy either, open the
-  position in lichess's analysis, or keep it; kept positions can be
-  shared as text.
-- **Steady display**: engine lines are shown as whole iterations (every
-  line at one depth), from depth 8 (shallower ones after 150 ms, so an
-  engine whose depth is capped by a strength limit is shown too); a change
-  of the arrows is shown once two iterations in a row agree on it, at any
-  depth, or when it has waited 700 ms (an engine often switches for one
-  iteration and back; and its iterations grow long, so a change that stays
-  must still arrive). When the move played began one of the engine's lines
-  for the position before, the rest of that line is shown at once, dimmed,
-  until the new search's own lines come. The same position's updates reach
-  the screen about twice a second; next to the depth the card says how often the position
-  came up and the number of the move (when the game was followed from its
-  start), as far as the card is wide; the card keeps its size from move
-  to move, showing the
-  last lines faded until the new ones arrive; while a move is read the
-  arrows stay away, so the old ones never flash back before the new ones.
-  Results of an old position can never land on a new one.
-- **Stability**: the engine runs under a supervisor that restarts it if it
-  stops (crash, or killed by Android), resends its options and resumes the
-  analysis; a position that crashes the engine twice is skipped. An engine
-  that runs but says nothing for 6 seconds after being asked to analyse (or
-  ends an analysis without a single line) is logged with everything it
-  printed, restarted, and if it stays silent run with one thread, then also
-  without the smothered-mate prover; the card says so. Errors are shown in
-  the overlay and written to a debug log (the tools: Copy the debug log).
+ChessOverlay reads a chess board straight from the screen, analyses the position with a chess engine, and draws the result over the board: arrows for the best moves, the engine's main line, and a floating card with the evaluation and the engine's lines. It works in any app that shows a board: chess sites in a browser, chess apps, videos, streams and e-books.
 
-## Using it
+It is meant for analysing your own games and studies wherever they are (game archives in other apps, videos, puzzles, books, screenshots) and for collecting positions to come back to.
 
-1. Install the APK (see Builds below). It targets Android API 28 on purpose
-   (see Notes), so Android may warn that it was built for an older version.
-2. The app has one screen, in four parts. At the top, chips for what the
-   overlay needs: **Models** (board recognition: built into CI builds; a
-   local build downloads it once), **Overlay** (permission to draw over
-   other apps) and **Engine**; tap a chip for what it needs. Under them the
-   start button, and the engine with its buttons: options, change, + to
-   add one (an arm64 UCI engine file; every UCI option it has can be
-   edited, grouped into Strength, Smotherfish, Performance and Other).
-3. The **position card** shows the last position the overlay saw, with the
-   engine's arrows: copy its FEN or its line, open it in lichess's
-   analysis, or keep it; kept positions are listed below it, to share as
-   text or to remove.
-4. The **settings** are named only; what each does is in the Help dialog
-   (the question mark at the top right), and the board above the settings
-   shows the drawing with your settings as you change them. They take
-   effect the next time the overlay starts.
-5. Tap **Start overlay** and allow screen capture, then open the app with
-   the board. The floating card: ▶ analyse now · A auto mode · ⇅ side to
-   move (auto / White / Black) · ◐ show/hide the arrows · ✕ close; drag it
-   by any part; tap the lines to fold them; keep a finger on it to copy
-   the position (its FEN) for pasting anywhere.
-6. The **tools**: if a read goes wrong, Copy the debug log, and Share the
-   last misread screen (the screen a read failed on, as the app saw it).
-   If no lines appear: Test the engine runs it with your options for a
-   few seconds and says what it did (and logs it). To see how long a read
-   takes on this phone: Test recognition.
+- **It follows the game.** Consecutive positions are linked by the move between them, so the overlay knows the side to move, the move number, castling rights and repetitions. In play, the move is usually found from the squares that changed alone, and analysis starts within milliseconds: fast enough for bullet.
+- **It reads with the game in mind.** During a game the next position can only follow from the previous one by a legal move, so a misread square or a piece hidden under the site's arrow cannot turn into another piece, and a board turned round is still the same game.
+- **It keeps the board clean.** Only arrows are drawn on the board. The evaluation, the lines and the controls are in a floating card that can be dragged anywhere.
 
-## Builds
+## Responsible use
 
-GitHub Actions builds the APK (workflow "Build APK", artifact
-`chessoverlay-apk`) each time a pull request changes, on every push to
-`main`, and by hand. Take the APK of a run on `main`: it is signed with
-the project key, so a newer one installs over an older one. The APK of a
-pull request is signed with a debug key made on the build machine, a new
-one each run, so those do not install over one another.
+ChessOverlay is an analysis tool. It has no built-in restriction on where it runs; how it is used is the user's responsibility.
 
-It bundles Smotherfish built from one commit of the
-[Smotherfish](https://github.com/Demonic1594/Smotherfish) repository, named
-as `ENGINE_REF` in `.github/workflows/build.yml` (the build log names it,
-and `THIRD_PARTY_NOTICES.md` links its source). To bundle another branch,
-tag or commit, run the workflow by hand and give it as `engine_ref`. To
-move the app to a newer engine, change the commit in the workflow and in
-the notices together.
+Using engine assistance in a live game against another person is cheating. It breaks the fair-play rules of Chess.com, Lichess and every other chess platform and over-the-board event; they detect it and close accounts for it. The authors do not support that use and are not responsible for any penalty that follows from it.
 
-Local build: Android SDK (platform 35), JDK 17+, then `./gradlew assembleRelease`.
-Put an arm64 engine at `app/src/main/jniLibs/arm64-v8a/libsmotherfish.so`
-to bundle it. Such a build is signed with the debug key of the build
-machine. To sign with the project key, give the keystore and its passwords
-(`-PsigningStoreFile=… -PsigningStorePassword=… -PsigningKeyAlias=… -PsigningKeyPassword=…`,
-or the environment variables `SIGNING_STORE_FILE` and so on).
+## Features
 
-The app icon is made by `tools/icon.py`: it writes the adaptive icon's three
-vector drawables (background, foreground, and the monochrome layer that
-themed icons use) and the status bar's icon from one description, and with
-Pillow draws a preview (`python3 tools/icon.py --preview build/icon.png`).
+### Board recognition
 
-## Tests
+- Finds the board anywhere on screen and reads all 64 squares and which side is at the bottom. The recognition is a Kotlin port of [chessimg2pos](https://github.com/mdicio/chessimg2pos) v2; its models run on ONNX Runtime and are bundled in the APK, the board model quantized to int8, which makes a read about twice as fast and shrinks the models from 125 MB to 38 MB.
+- Refines the located board to its exact edges before reading it. On the 200-board benchmark that CI runs, this raised the number of boards read correctly from 179 to 197.
+- Measures the phone once, at the overlay's first start, and keeps the fastest way of running the models that reads correctly (ONNX Runtime's CPU code with one, two or four threads; XNNPACK and NNAPI can be tried with **Test recognition**).
 
-The code is split in two modules: `core` (plain Kotlin: chess rules, UCI
-parsing, game tracking, reading boards in the light of the game, and the
-overlay's layout as plain shapes) and `app` (Android: screen capture,
-recognizer, engine processes, views).
+### Following a game
 
-`./gradlew :core:test` runs chess logic (legal moves, notation), game
-tracking and change detection (including that the overlay's own drawing is
-never taken for a move, and a simulation of gliding pieces: read soon after
-they stop, never in flight), orientation and game-aware decoding (misread
-squares, boards turned round, undo), the game's memory (a step back is
-exact; repetitions; the move's number; castling rights, the en passant
-square and the halfmove clock across a game, as python-chess counts them),
-what `play` refuses, steady lines, the card's layout (nothing runs past it
-at any width), the engine watchdog (a fake engine that only answers on one
-thread gets restarted until it does; "bestmove (none)" is passed on), the
-debug log, and renders
-previews of the overlay on a phone-sized board to `core/build/preview/*.png`.
-With `ENGINE_BIN=/path/to/engine` (and optionally `ENGINE_THREADS`) it also
-runs the app's engine code (EngineHost, UciEngine) against a real engine on
-three positions, the way the overlay does.
+- **Auto mode** (on by default) follows the screen without flicker. About 33 times a second it compares 49 sample points per square with the last read, skipping the points under its own drawing. When at least two squares have changed and the board has been still for 80 ms, it is read from a screen capture taken without the overlay's drawing. A capture that no longer matches the still board (a piece started gliding) is discarded, so pieces are never read in flight.
+- **Fast enough for bullet.** The squares that changed and the legal moves usually leave exactly one move that explains them, or a move and the reply that came with it. That move is analysed as soon as the board is still, before the recognizer runs; the reading of the capture then confirms or corrects it. In a fast game (the last moves a median 1.5 s apart or less) the board is checked every 20 ms instead of 30, read after 55 ms of stillness instead of 80, and the first lines are shown from depth 4 instead of 8.
+- **The game is remembered.** Castling rights, the en passant square and the halfmove clock follow the moves. A step back in the move list, or an undo, restores the position as it was then. The card shows the move number and how often the position came up. The game survives the board leaving the screen for a while.
 
-`./gradlew testDebugUnitTest` runs (on the build machine):
-- UCI parsing, and with `ENGINE=/path/to/engine` a real analysis;
-- the recognizer against chessimg2pos (Python) on the same images: Pillow's
-  resize reproduced to within 1 level, and with `MODELS=/folder/with/onnx`
-  the same positions, orientation and board corners (within 2 px), and with
-  `QMODELS` the bundled int8 model reading every image as the original does;
-- the engine supervisor (a killed engine restarts and the analysis
-  finishes; a position that kills it is skipped);
-- the board's edges on two phone screenshots (`BoardEdgesScreensTest`; in
-  core, `BoardEdgesTest` does the same on drawn boards), and a move seen
-  at once with the real recognizer (`FastReadTest`);
-- the benchmark of board reading (`BenchTest`; `BENCH` = boards as lichess
-  shows them, which the build workflow renders with `tools/bench/gen.py`):
-  how many are read right with the locator's corners, with them sharpened
-  as the app reads, with exact corners, and with corners off by up to
-  2.5 % of a side; the table is the artifact `bench-report`;
-- the tuner against the real models (`TunerTest`): every way that runs
-  reads the board as the default does, and a way that is not available is
-  reported.
+### Analysis and display
 
-CI runs that engine test on a real arm64 machine too (`engine-arm64`: the
-engine from the APK, 4 threads as on a phone), and
-`connectedDebugAndroidTest` on an x86_64 emulator with an x86_64
-build of Smotherfish: the main screen, the engine on Android, recognition and
-the whole pipeline on a screenshot, recognition measured each way of
-running the models, and renderings of the overlay, of the app icon and of
-the Positions card (`device-test-output` artifact). The emulator is
-Android 14.
+- **Engines.** Smotherfish (Stockfish-based) is built in. Any arm64 UCI engine binary can be added (Stockfish, Komodo, lc0 with a Maia network as its `WeightsFile`, ...), and engine apps that offer engines to chess GUIs (the Open Exchange protocol DroidFish uses) are found automatically. Every UCI option the engine declares can be edited.
+- **On the board, only arrows.** The best move is one bold blue arrow, the next best lines thinner ones in their own colours, and the best line's next moves slim arrows numbered per side in a disc on their destination square. The move just played is graded in the opposite corner: best, good, inaccuracy, mistake or blunder, by the win chance it gave away (lichess's thresholds).
+- **Floating card.** The buttons, the evaluation from White's point of view with an evaluation bar, the depth, the move number and repetitions, and one row per engine line in short algebraic notation, with a colour chip that matches its arrow.
+- **Steady display.** Lines are shown as whole iterations, never mixed depths. A change of the arrows is shown once two iterations in a row agree on it, or after 700 ms. After a move the engine expected, what it had looked at next is shown at once, dimmed, until the new lines arrive. While a move is read, the drawing is held back rather than blanked and restored. Results of an old position never land on a new one.
 
-Compiling where the Android Gradle plugin cannot run (on a phone, say):
-`python3 tools/compile.py` compiles the Kotlin of core, of the app and of
-both of its test sets with the standalone Kotlin compiler and Android's
-`android.jar` (about 300 MB under `build/toolchain`, then a few seconds);
-`--run` also runs core's tests. It needs JDK 17 or later, and
-`tools/compile-classpath.txt`: the app's classpaths as Gradle resolves them.
-The build workflow writes them as its artifact `compile-classpath`; copy
-that file there when a dependency changes. It checks that the code
-compiles: resources are not compiled and nothing of Android runs.
+### Positions and diagnostics
 
-## Notes
+- A long press on the card copies the position's FEN. The app's position card shows the last position with the engine's line; positions can be kept and shared as text, or opened in lichess's analysis.
+- The engine runs under a supervisor that restarts it after a crash and steps down its settings if it falls silent.
+- Every read and every engine event is written to a debug log with its timing. The app's tools test the engine, measure recognition, copy the log and share the screen of the last misread.
 
-- **targetSdk 28**: from API 29 on, Android does not let an app run a file
-  it wrote itself, and loading your own engines depends on that (DroidFish
-  does the same). Such apps can be sideloaded but not published on Google
-  Play.
-- Recognition reads the pieces, not the move history. In a game the
-  overlay follows move by move, the moves are kept: a king or rook that
-  has moved cannot castle any more (the engine is no longer told it can),
-  and the engine is told when a capture en passant is possible. A position
-  it jumps to (the move list, a game joined late) is known from its pieces
-  only: castling is then taken to be possible while king and rook stand on
-  their squares, and whether a pawn has just advanced two squares is not
-  known. A step back in the move list, or an undo, takes the position as
-  the game had it, as far back as the game was followed. In manual mode
-  the side to move
-  is the side at the bottom unless a king is in check (⇅ overrides it).
+## Getting started
 
-## Credits and licences
+### Requirements
 
-- chessimg2pos v2 (Mattia Dicio, MIT): recognition models and the method
-  ported in `vision/`.
-- ONNX Runtime (Microsoft, MIT).
-- Smotherfish / Stockfish (GPL-3.0), bundled as a separate executable.
-- Open Exchange engine discovery follows the protocol of Kalab's chess
-  engine support library (Apache-2.0); the code here is a new implementation.
+| | |
+|---|---|
+| Android | 8.0 (API 26) or later |
+| CPU | arm64-v8a |
+| Permissions | Display over other apps; screen capture (Android asks at every start); notifications on Android 13 and later |
 
-The repository has no licence file yet. Because the APK bundles a GPL-3.0
-engine, distributing the APK means providing that engine's source (the
-Smotherfish repository). `THIRD_PARTY_NOTICES.md` lists the licences of
-what the APK contains, and the Smotherfish commit each build is made from.
+### Download
+
+There are no GitHub Releases yet. APKs are built by GitHub Actions:
+
+1. Open **Actions**, choose the **Build APK** workflow and pick the latest successful run on the branch you want.
+2. Under **Artifacts**, download `chessoverlay-apk` and unzip it.
+3. Install `app-release.apk`.
+
+APKs from pushes to `main` and from manual runs are signed with the project key, so a newer one installs over an older one. APKs from pull requests are signed with a temporary debug key and do not install over another build: uninstall the previous one first.
+
+### Install
+
+When Android asks, allow your browser or file manager to install apps. It also warns that the app was built for an older Android version: it targets API 28 on purpose (see [Known limitations](#known-limitations)).
+
+### First steps
+
+1. Open the app. The three chips at the top show what the overlay needs: **Models**, **Overlay** (permission to draw over other apps) and **Engine**. Tap an amber chip to set it right.
+2. Pick an engine, and adjust its options if you want to.
+3. Tap **Start overlay** and allow screen capture.
+4. Switch to the app with the board. The overlay finds it, reads it and starts analysing.
+
+## Usage
+
+The app has one screen in four parts; what everything does is also in the Help dialog (the question mark at the top right).
+
+| <img src="docs/images/app-top.png" width="252" alt="The app: status chips, start button, engine and the position card"> | <img src="docs/images/overlay-mate.png" width="536" alt="The overlay over a board, with a mate in two"> |
+|:---:|:---:|
+| The app: status, start button, engine and the last position | The overlay: a mate in two |
+
+- **Status and start.** The chips for what the overlay needs, the start button, and the engine with buttons to change it, open its options and add one. The line under the app's name says whether the overlay is running and how the models are read on this phone.
+- **Position.** The last position the overlay saw, with the engine's arrows, who is to move, the evaluation, the depth and the line. **Copy FEN**, **Copy line**, **Analyse online** (lichess.org's analysis) and **Keep**; the kept positions are listed below, to share as text or remove. At most 100 positions are kept.
+- **Settings** and **Tools**: below.
+
+### The floating card
+
+| Control | What it does |
+|---|---|
+| Read now | Reads the screen once and analyses the position. |
+| Auto | Switches auto mode, which follows the game by itself, on or off. |
+| Side | The side to move: worked out from the game, White, or Black. A choice by hand overrides the game. |
+| Arrows | Shows or hides the drawing on the board. |
+| Close | Stops the overlay. |
+
+Drag the card by any part of it to move it; it stays where it is put. Tap the evaluation or a line to fold the lines away and back. Keep a finger on the card for a moment to copy the position's FEN to the clipboard.
+
+### Settings
+
+Settings take effect the next time the overlay starts.
+
+| Setting | Values | Default | Effect |
+|---|---|---|---|
+| Lines | 1 to 5 | 3 | How many moves the engine searches and lists. |
+| Time per position | 1, 2, 3, 5, 10 s, unlimited | unlimited | How long the engine analyses a position. Unlimited keeps thinking until the position changes. |
+| Start in auto mode | on, off | on | The overlay follows the game from the start. |
+| Recognition certainty | 30, 50, 70, 90 % | 50 % | Boards read less surely than this are not analysed. |
+| Arrows | 0 to 5 | 2 | How many lines get an arrow on the board. |
+| Next moves of the best line | 0 to 6 | 2 | How many of the best line's following moves are drawn as numbered arrows. |
+| Scores on the arrows | off, on | off | Writes each line's score at the tip of its arrow. |
+| Grade the last move | on, off | on | Marks the move just played on its destination square. |
+| Evaluation bar | on, off | on | Shows the evaluation bar on the card. |
+| Engine lines | on, off | on | Lists the engine's lines on the card. |
+| Put the card back next to the board | button | | Returns the card to where it follows the board. |
+
+The settings are named only; what each does is in the Help dialog. The board in the position card is drawn with the arrow settings (with a sample position until the overlay has seen one), so their effect is seen at once.
+
+### Engines
+
+- **Built in:** Smotherfish.
+- **An engine file:** any arm64 UCI engine binary, added with the **+** button next to the engine.
+- **Engine apps:** apps that offer engines to chess GUIs over the Open Exchange protocol are found automatically.
+- **Options:** every UCI option the engine declares, grouped into Strength, Smotherfish, Performance and Other. This includes `UCI_LimitStrength` and `UCI_Elo`, and Smotherfish's own `Analysis Elo` and `Smother*` options.
+
+### Tools
+
+| Tool | What it does |
+|---|---|
+| Test the engine | Starts the engine as the overlay does, with your options, analyses a test position and reports what happened. |
+| Test recognition | Times a read with each way of running the models on this phone, shows the table and keeps the fastest that reads correctly. |
+| Copy the debug log | Copies the log of reads and engine events to the clipboard for a bug report. |
+| Share the last misread screen | Shares the screen of the last misread, as the app saw it. A screen is kept only when a board was read wrongly twice in a row. |
+| Clear the log | Empties the debug log. |
+
+### Troubleshooting
+
+| Symptom | What to do |
+|---|---|
+| Nothing is drawn | The app should say **Running**, and the app with the board should be in front. The card says what the overlay is doing; *Looking for a board* means it has not found one yet. |
+| *No clear board found* | The board must be large, sharp and square on screen: zoom in, close side panels and let animations finish. |
+| The position is wrong | Use **Share the last misread screen** and **Copy the debug log**, and open an issue with both. |
+| *Board gone; looking for it* | The board left the screen, or could not be read three times in a row. The analysis resumes when it is back. |
+| The card reports the engine stopping or staying silent | Run **Test the engine**. A silent engine is restarted with safer settings by itself; the log says what happened. |
+| Reading is slow | Run **Test recognition**; its table says where the time goes on this phone. |
+
+### What a picture cannot tell
+
+Recognition reads the pieces, not the move history. In a game the overlay follows, castling rights, the en passant square and the halfmove clock follow the moves. For a position it jumps to directly (the move list, a game joined late), castling is taken to be possible while king and rook stand on their squares, and whether a pawn has just advanced two squares is unknown. Without auto mode, the side to move is the side at the bottom unless a king is in check; the **Side** control overrides it.
+
+The full guide, with every part of the screen, is in [docs/usage.md](docs/usage.md).
+
+## How it works
+
+```
+Screen capture
+      |
+      v
+Locate the board --> refine its edges --> classify the 64 squares and the orientation
+      |
+      v
+Read in the light of the game: which move leads from the last position to this one?
+      |
+      v
+Engine analysis (UCI) --> lines, scores, the grade of the last move
+      |
+      v
+Overlay: arrows on the board, a floating card for everything else
+```
+
+The code is split in two modules: `core` (plain Kotlin: chess rules, UCI, engine supervision, game tracking, the reading logic and the overlay's layout) and `app` (Android: screen capture, the recognizer on ONNX Runtime, the views). [docs/how-it-works.md](docs/how-it-works.md) describes each step and the numbers behind it.
+
+## Development
+
+### Project layout
+
+```
+core/    Plain Kotlin, no Android: chess rules, UCI parsing, engine supervision,
+         game tracking, board reading, the overlay's layout as plain shapes
+app/     The Android app: screen capture, the recognizer, views, settings, engines
+tools/   bench/gen.py (benchmark boards)     compile.py (compile without the Android SDK)
+         icon.py (the app icon)              quantize_models.py (int8 board model)
+docs/    The documentation and its images
+.github/workflows/build.yml    Build, tests, benchmark, APK
+```
+
+### Build from source
+
+JDK 17 or later and the Android SDK (platform 35) are needed.
+
+```sh
+./gradlew assembleRelease
+```
+
+The APK is written to `app/build/outputs/apk/release/app-release.apk`. Such a build has no engine or recognition models in it unless you add them: see [docs/development.md](docs/development.md).
+
+### Run the tests
+
+| Command | Runs | Needs |
+|---|---|---|
+| `./gradlew :core:test` | `core`'s tests on the JVM | Nothing; with `ENGINE_BIN=/path/to/engine` also the engine code against a real engine |
+| `./gradlew testDebugUnitTest` | The app's tests on the JVM | `MODELS=/folder/with/the/onnx/models` for the recognizer; `QMODELS` and `BENCH` for the rest |
+| `./gradlew connectedDebugAndroidTest` | The app's tests on a device or emulator | A device; `-PextraAbi=x86_64` for an x86_64 emulator |
+| `python3 tools/compile.py --run` | Compiles everything and runs `core`'s tests where the Android SDK cannot run | JDK 17 or later only |
+
+CI runs the Gradle tasks on every change, plus the benchmark and the engine on real arm64 hardware. Details, the list of artifacts, the benchmark and how another engine is bundled: [docs/development.md](docs/development.md).
+
+## Known limitations
+
+- **Not on Google Play.** The app targets API 28 on purpose: from API 29 on, Android does not let an app execute files it wrote itself, which loading your own engines depends on (DroidFish does the same). It can be sideloaded only.
+- **The locator is the weak link of recognition.** On 2 of the 200 benchmark boards it returns a tilted box for a board that stands square, and nothing corrects that. On 1 board, a position of only kings and pawns turned for Black, the model's orientation is wrong even with exact corners.
+- **Not tested on phones in CI.** CI runs the app on an x86_64 emulator (Android 14) and the engine on arm64 hardware. How fast a phone reads, and whether the shorter delays of a fast game suit every chess site's animations, can only be seen on the device.
+- **The benchmark's phone screens are simplified.** They show a board with bars above and below it, not the full layout of a chess app.
+
+## Contributing
+
+Issues and pull requests are welcome. A pull request should say what changed and how it was checked; CI builds the APK and runs the tests and the benchmark on every change.
+
+## Licence
+
+The app's own code has no licence yet. Until one is chosen, the default applies: the code may be read and forked, but not used, modified or distributed.
+
+The APK bundles Smotherfish, which is under the GNU General Public License, version 3. Distributing the APK means providing that engine's source.
+
+## Third-party software
+
+| Component | Used for | Licence |
+|---|---|---|
+| [chessimg2pos](https://github.com/mdicio/chessimg2pos) v2 | Recognition models, and the method ported in `vision/` | MIT |
+| [ONNX Runtime](https://github.com/microsoft/onnxruntime) | Running the models | MIT |
+| [Smotherfish](https://github.com/Demonic1594/Smotherfish) / [Stockfish](https://stockfishchess.org) | The built-in engine, as a separate executable | GPL-3.0 |
+| AndroidX, Material Components, Kotlin, kotlinx.coroutines | The app | Apache-2.0 |
+
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) has the licence texts, and the Smotherfish commit each build is made from. The Open Exchange engine discovery follows the protocol of Kalab's chess engine support library (Apache-2.0); none of its code is in the APK.
+
+<sub>The overlay images are rendered in CI by the overlay's own drawing code on a phone-sized board. The app screenshots were taken on the emulator the tests run on, 320 px wide.</sub>
