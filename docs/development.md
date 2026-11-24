@@ -63,7 +63,7 @@ The same values can be given as the environment variables `SIGNING_STORE_FILE`, 
 |---|---|---|
 | `MODELS` | The folder with the original models | The recognizer against chessimg2pos's recorded output (`VisionTest`); a move seen at once with the real recognizer (`FastReadTest`); the tuner (`TunerTest`) |
 | `ENGINE` | An engine executable | The engine supervisor against a real engine (`EngineHostTest`); a real analysis (`UciTest`); a board that moved, found again (`RelocateTest`, with `MODELS`) |
-| `QMODELS` | The folder with the bundled int8 models | The int8 model against the original on every test image (`QuantizedModelTest`, with `MODELS`); the benchmark on the int8 model |
+| `QMODELS` | The folder with the bundled int8 models | The int8 model against the original on every test image, square by square where the original is sure (`QuantizedModelTest`, with `MODELS`); the benchmark on the int8 model |
 | `BENCH` | The folder with the benchmark boards | The benchmark (`BenchTest`, with `MODELS`) |
 
 ### The app's tests on a device
@@ -167,7 +167,4 @@ The images under `docs/images/` are made from what CI renders. The three overlay
 
 ## Contributing
 
-- Keep `core` free of Android: what can be tested on the JVM goes there.
-- A commit message says what changed, why, and how it was checked. Each commit should leave the build and the tests passing.
-- A change to the recognition should say what the benchmark did before and after.
-- CI runs on every pull request and should pass before a change is merged.
+[CONTRIBUTING.md](../CONTRIBUTING.md) says how to report a problem and what a pull request should contain.

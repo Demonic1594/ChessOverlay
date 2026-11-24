@@ -19,6 +19,7 @@
   <a href="#usage">Usage</a> &middot;
   <a href="docs/how-it-works.md">How it works</a> &middot;
   <a href="#development">Development</a> &middot;
+  <a href="#contributing">Contributing</a> &middot;
   <a href="#licence">Licence</a>
 </p>
 
@@ -242,7 +243,7 @@ CI runs the Gradle tasks on every change, plus the benchmark and the engine on r
 
 ## Contributing
 
-Issues and pull requests are welcome. A pull request should say what changed and how it was checked; CI builds the APK and runs the tests and the benchmark on every change.
+Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) says how to report a problem and what a pull request should contain.
 
 ## Licence
 
