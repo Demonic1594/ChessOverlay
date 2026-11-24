@@ -11,7 +11,9 @@ import kotlin.math.ceil
 /**
  * The floating card (see [CardLayer]): buttons, evaluation and lines in one
  * window. Drag it anywhere to move it; tap a button to use it; tap the
- * evaluation or the lines to fold the lines away or back.
+ * evaluation or the lines to fold the lines away or back; keep a finger on
+ * it for a moment for [Listener.onLongPress] (the service copies the
+ * position).
  */
 class CardView(
     ctx: Context,
@@ -22,6 +24,17 @@ class CardView(
         fun onButton(b: CardButton)
         fun onDrag(dx: Int, dy: Int, done: Boolean)
         fun onFold(collapsed: Boolean)
+        /** A finger kept on the card without moving it. */
+        fun onLongPress()
+    }
+
+    private val longPressTimeout = ViewConfiguration.getLongPressTimeout()
+    private var longPress: Runnable? = null
+    private var longPressed = false
+
+    private fun stopLongPress() {
+        longPress?.let { removeCallbacks(it) }
+        longPress = null
     }
 
     private val renderer = ShapeRenderer()
@@ -69,15 +82,29 @@ class CardView(
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { downX = e.rawX; downY = e.rawY; dragging = false }
+            MotionEvent.ACTION_DOWN -> {
+                downX = e.rawX; downY = e.rawY; dragging = false; longPressed = false
+                val press = Runnable {
+                    if (!dragging) {
+                        longPressed = true
+                        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                        listener.onLongPress()
+                    }
+                }
+                longPress = press
+                postDelayed(press, longPressTimeout.toLong())
+            }
             MotionEvent.ACTION_MOVE -> {
                 val dx = e.rawX - downX
                 val dy = e.rawY - downY
-                if (!dragging && (abs(dx) > slop || abs(dy) > slop)) dragging = true
+                if (!dragging && (abs(dx) > slop || abs(dy) > slop)) { dragging = true; stopLongPress() }
                 if (dragging) listener.onDrag(dx.toInt(), dy.toInt(), false)
             }
             MotionEvent.ACTION_UP -> {
-                if (dragging) {
+                stopLongPress()
+                if (longPressed) {
+                    // The press was used; the finger going away is not a tap.
+                } else if (dragging) {
                     listener.onDrag((e.rawX - downX).toInt(), (e.rawY - downY).toInt(), true)
                 } else {
                     val l = current(width)
@@ -88,6 +115,7 @@ class CardView(
                 dragging = false
             }
             MotionEvent.ACTION_CANCEL -> {
+                stopLongPress()
                 if (dragging) listener.onDrag((e.rawX - downX).toInt(), (e.rawY - downY).toInt(), true)
                 dragging = false
             }

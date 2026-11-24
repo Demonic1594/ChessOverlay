@@ -17,6 +17,7 @@ compiled (a stub R stands in for theirs), and nothing of Android runs.
 import argparse
 import hashlib
 import io
+import os
 import pathlib
 import re
 import subprocess
@@ -122,6 +123,11 @@ def libraries():
                     if ext == "aar":
                         with zipfile.ZipFile(io.BytesIO(data)) as z:
                             data = z.read("classes.jar")
+                            if "R.txt" in z.namelist() and "AndroidManifest.xml" in z.namelist():
+                                package = re.search(rb'package="([^"]+)"', z.read("AndroidManifest.xml"))
+                                if package:
+                                    (target.parent / f"{artifact}-{version}.R.kt").write_text(
+                                        library_r(package.group(1).decode(), z.read("R.txt").decode("utf-8", "replace")))
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_bytes(data)
                     break
@@ -132,6 +138,20 @@ def libraries():
                 continue
         jars.append(target)
     return jars
+
+
+def library_r(package, r_txt):
+    """A library's R from its R.txt ("int string title = 0x7f040001;"), as AGP generates it for each dependency."""
+    fields = {}
+    for kind, name, value in re.findall(r"int\s+(\w+)\s+(\w+)\s*=\s*(0x[0-9a-fA-F]+)\s*;", r_txt):
+        fields.setdefault(kind, []).append((name, value))
+    lines = ["// Made by tools/compile.py from the library's R.txt.", '@file:Suppress("unused")', "", f"package {package}", "", "object R {"]
+    for kind in sorted(fields):
+        lines.append(f"    object {kind} {{")
+        for name, value in fields[kind]:
+            lines.append(f"        const val `{name}`: Int = {value}")
+        lines.append("    }")
+    return "\n".join(lines) + "}\n"
 
 
 def stub_r():
@@ -173,11 +193,15 @@ def stub_r():
     return out
 
 
+# What --run does not run: the overlay previews need fonts (java.awt), which a phone's JDK has not.
+NOT_RUN = ("OverlayPreviewTest",)
+
+
 def sources():
     found = []
     for root in ("core/src/main/java", "app/src/main/java", "app/src/test/java", "app/src/androidTest/java"):
         found += sorted((REPO / root).rglob("*.kt"))
-    return [stub_r()] + found
+    return [stub_r()] + sorted((TOOLCHAIN / "libs").glob("*.R.kt")) + found
 
 
 def main():
@@ -192,22 +216,30 @@ def main():
     out.mkdir(exist_ok=True)
     files = sources()
     print(f"compiling {len(files)} Kotlin files with {len(cp)} libraries")
-    cmd = [str(compiler / "bin/kotlinc"), "-jvm-target", "17", "-no-reflect", "-nowarn",
-           "-classpath", ":".join(str(p) for p in cp), "-d", str(out)]
+    base = [str(compiler / "bin/kotlinc"), "-jvm-target", "17", "-no-reflect", "-nowarn"]
     for a in args.jvm_arg or ["-Xmx1500m", "-XX:+UseSerialGC"]:
-        cmd.append("-J" + a)
-    result = subprocess.run(cmd + [str(f) for f in files])
+        base.append("-J" + a)
+    # core's tests are compiled on their own: they and the app's have classes of the same names.
+    result = subprocess.run(base + ["-classpath", ":".join(str(p) for p in cp), "-d", str(out)] + [str(f) for f in files])
     if result.returncode or not args.run:
         sys.exit(result.returncode)
-    stdlib = next((compiler / "lib").glob("kotlin-stdlib.jar"))
-    cp_run = ":".join(str(p) for p in [out, stdlib, TOOLCHAIN / "libs/junit-4.13.2.jar", TOOLCHAIN / "libs/hamcrest-core-1.3.jar",
-                                      TOOLCHAIN / "libs/json-20240303.jar"])
+    libs = TOOLCHAIN / "libs"
+    tests = sorted((REPO / "core/src/test/java").rglob("*.kt"))
+    test_out = TOOLCHAIN / "test-classes"
+    test_out.mkdir(exist_ok=True)
+    print(f"compiling {len(tests)} of core's test files")
+    if subprocess.run(base + ["-classpath", f"{out}:{libs}/junit-4.13.2.jar:{libs}/hamcrest-core-1.3.jar",
+                              "-d", str(test_out)] + [str(f) for f in tests]).returncode:
+        sys.exit(1)
     classes = []
-    for f in sorted((REPO / "core/src/test/java").rglob("*.kt")):
-        names = re.findall(r'^class (\w+)\b', f.read_text(), re.M)
-        classes += [f"io.github.chessoverlay.{n}" for n in names]
-    sys.exit(subprocess.run(["java", "-XX:+UseSerialGC", "-Djava.awt.headless=true", "-Dpreview.dir=" + str(TOOLCHAIN / "preview"),
-                             "-cp", cp_run, "org.junit.runner.JUnitCore"] + classes).returncode)
+    for f in tests:
+        classes += [f"io.github.chessoverlay.{n}" for n in re.findall(r"^class (\w+)\b", f.read_text(), re.M) if n not in NOT_RUN]
+    print(f"running core's tests ({len(classes)} classes; not {", ".join(NOT_RUN)}: it needs fonts)")
+    stdlib = next((compiler / "lib").glob("kotlin-stdlib.jar"))
+    java = str(pathlib.Path(os.environ["JAVA_HOME"]) / "bin/java") if os.environ.get("JAVA_HOME") else "java"
+    sys.exit(subprocess.run([java] + args.jvm_arg + ["-Djava.awt.headless=true", "-Dpreview.dir=" + str(TOOLCHAIN / "preview"),
+                                                     "-cp", f"{test_out}:{out}:{stdlib}:{libs}/junit-4.13.2.jar:{libs}/hamcrest-core-1.3.jar",
+                                                     "org.junit.runner.JUnitCore"] + classes).returncode)
 
 
 if __name__ == "__main__":

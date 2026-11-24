@@ -23,6 +23,7 @@ import io.github.chessoverlay.overlay.CardStyle
 import io.github.chessoverlay.overlay.CardView
 import io.github.chessoverlay.overlay.DrawView
 import io.github.chessoverlay.overlay.MoveMark
+import io.github.chessoverlay.overlay.OverlayService
 import io.github.chessoverlay.overlay.OverlayState
 import io.github.chessoverlay.vision.Img
 import io.github.chessoverlay.vision.Recognizer
@@ -72,6 +73,25 @@ class DeviceTest {
             s.onActivity { a -> assertTrue("main screen finished at once", !a.isFinishing) }
             Thread.sleep(1500)   // engines listed in the background
             s.onActivity { a -> saveWholePage(a.findViewById(R.id.content), a.window.decorView.width, "main.png") }
+        }
+    }
+
+    /** The Positions card with a position and two kept ones. The overlay needs a screen to capture, so the position is put where it leaves its last one. */
+    @Test fun positionsCard() {
+        val p = Analyst.Position("r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3", true, 3, "+0.4", 24,
+            "3. Bb5 a6 4. Ba4 Nf6")
+        OverlayService.lastPosition = p
+        KeptPositions.clear(ctx)
+        KeptPositions.add(ctx, p)
+        KeptPositions.add(ctx, Analyst.Position("8/8/6R1/3P4/1kP1N3/pP5P/P2B2P1/5K2 b - - 0 1", false, null, "M3", 30, "1... Kb4 2. Bd2#"))
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { s ->
+                Thread.sleep(1200)
+                s.onActivity { a -> saveWholePage(a.findViewById(R.id.content), a.window.decorView.width, "positions.png") }
+            }
+        } finally {
+            KeptPositions.clear(ctx)
+            OverlayService.lastPosition = null
         }
     }
 
@@ -255,6 +275,7 @@ class DeviceTest {
             override fun onButton(b: CardButton) {}
             override fun onDrag(dx: Int, dy: Int, done: Boolean) {}
             override fun onFold(collapsed: Boolean) {}
+            override fun onLongPress() {}
         })
         card.state = state
         card.controls = CardControls(auto = true)

@@ -55,6 +55,38 @@ class Analyst(
 
     private data class Pending(val move: String, val before: Board, val bestBefore: PvLine, val whiteBefore: Boolean)
 
+    /** What the overlay has of a position, to copy it out: to an engine, an analysis site, another chess app. */
+    data class Position(
+        /** The position as a FEN. */
+        val fen: String,
+        val whiteToMove: Boolean,
+        /** The number of the move to be played, when the game was followed from its start; else null. */
+        val moveNumber: Int?,
+        /** The evaluation in pawns from White's view, when lines have come; else null. */
+        val score: String?,
+        val depth: Int,
+        /** The engine's best line in short algebraic notation, with the game's move numbers. */
+        val line: String,
+    ) {
+        val side: String get() = if (whiteToMove) "White to move" else "Black to move"
+
+        /** One line, for a list or a note: "move 12 · White to move · eval +0.4 · depth 24". */
+        fun summary(): String =
+            listOfNotNull(moveNumber?.let { "move $it" }, side, score?.let { "eval $it" }, if (depth > 0) "depth $depth" else null).joinToString(" · ")
+
+        /** For a message: the summary, the line and the FEN. */
+        fun text(): String = summary() + (if (line.isNotEmpty()) "\n$line" else "") + "\n$fen"
+    }
+
+    /** The current position and what the engine has shown of it; null before the first board was read. */
+    fun position(): Position? = synchronized(lock) {
+        val s = state
+        val b = s.board ?: return@synchronized null
+        val top = s.lines.firstOrNull()
+        Position(b.fen(s.whiteToMove), s.whiteToMove, s.moveNumber, top?.let { CardLayer.shortScore(it, s.whiteToMove) },
+            top?.depth ?: 0, top?.let { b.lineText(it.pv, s.whiteToMove, 8, s.moveNumber ?: 1) } ?: "")
+    }
+
     /** Engine results, from the engine thread. */
     fun onEngine(u: AnalysisUpdate): Unit = synchronized(lock) {
         if (u.id != requestId) return
@@ -327,6 +359,12 @@ class Analyst(
     }
 
     fun status(s: String) = synchronized(lock) { publish(state.copy(status = s)) }
+
+    /** A message on the card that is not about the analysis (a button was used): [unflash] takes it off again. */
+    fun flash(text: String) = status(text)
+
+    /** Ends a message of [flash] that is still showing (a new position may have replaced it). */
+    fun unflash(text: String) = synchronized(lock) { if (state.status == text) publish(state.copy(status = "")) }
 
     private fun publish(s: OverlayState) {
         state = s

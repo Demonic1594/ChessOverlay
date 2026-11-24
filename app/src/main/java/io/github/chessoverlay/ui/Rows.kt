@@ -114,6 +114,24 @@ class Rows(private val parent: LinearLayout) {
         return field
     }
 
+    /** A row of buttons of equal width (`labels` short: one line each). */
+    fun buttons(labels: List<String>, onClick: (Int) -> Unit) {
+        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        for ((i, label) in labels.withIndex()) {
+            val button = MaterialButton(ctx, null, R.attr.tonalButtonStyle).apply {
+                text = label
+                maxLines = 1
+                setPadding(ctx.dp(8f), paddingTop, ctx.dp(8f), paddingBottom)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    if (i < labels.size - 1) marginEnd = ctx.dp(8f)
+                }
+                setOnClickListener { onClick(i) }
+            }
+            row.addView(button)
+        }
+        parent.addView(row)
+    }
+
     fun check(icon: Int, title: String): CheckRow {
         separate()
         val v = inflater.inflate(R.layout.row_check, parent, false)

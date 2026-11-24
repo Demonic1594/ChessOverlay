@@ -24,11 +24,13 @@ import com.google.android.material.progressindicator.LinearProgressIndicator
 import io.github.chessoverlay.engine.EngineCheck
 import io.github.chessoverlay.engine.EngineInfo
 import io.github.chessoverlay.engine.EngineRegistry
+import io.github.chessoverlay.overlay.Analyst
 import io.github.chessoverlay.overlay.BoardStyle
 import io.github.chessoverlay.overlay.OverlayService
 import io.github.chessoverlay.ui.CheckRow
 import io.github.chessoverlay.ui.PreviewBoardView
 import io.github.chessoverlay.ui.Rows
+import io.github.chessoverlay.ui.dp
 import io.github.chessoverlay.vision.ModelStore
 import io.github.chessoverlay.vision.Tuner
 import kotlin.concurrent.thread
@@ -51,6 +53,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var preview: PreviewBoardView
     private var engines: List<EngineInfo> = emptyList()
     private var downloading = false
+    private lateinit var positionTitle: TextView
+    private lateinit var positionFen: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,6 +83,7 @@ class MainActivity : AppCompatActivity() {
             }, REQ_IMPORT)
         }
 
+        buildPositions()
         buildAnalysis(Rows(findViewById(R.id.analysis)))
         preview = findViewById(R.id.preview)
         buildBoard(Rows(findViewById(R.id.boardSettings)))
@@ -194,6 +199,90 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** The position the overlay saw last (its FEN, the engine's line; to copy, to open in an analysis site, to keep), and the positions kept. */
+    private fun buildPositions() {
+        positionTitle = findViewById(R.id.positionTitle)
+        positionFen = findViewById(R.id.positionFen)
+        val actions = Rows(findViewById(R.id.positionActions))
+        actions.buttons(listOf("Copy FEN", "Copy line")) { i ->
+            val p = OverlayService.lastPosition ?: return@buttons
+            if (i == 0) copy("ChessOverlay position", p.fen) else copy("ChessOverlay line", p.text())
+        }
+        actions.buttons(listOf("Analyse on the web", "Keep")) { i ->
+            val p = OverlayService.lastPosition ?: return@buttons
+            if (i == 0) analyseOnTheWeb(p.fen) else { KeptPositions.add(this, p); toast("Kept (${KeptPositions.all(this).size})"); showPositions() }
+        }
+    }
+
+    /** The card as the last position and the kept ones are now; called each time the screen shows. */
+    private fun showPositions() {
+        val p = OverlayService.lastPosition
+        findViewById<TextView>(R.id.positionEmpty).visibility = if (p == null) View.VISIBLE else View.GONE
+        positionFen.visibility = if (p == null) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.positionActions).visibility = if (p == null) View.GONE else View.VISIBLE
+        positionTitle.text = if (p != null) "Last position: ${p.side}" else "Last position"
+        if (p != null) {
+            positionFen.text = p.fen
+            val detail = findViewById<TextView>(R.id.positionDetail)
+            detail.visibility = View.VISIBLE
+            detail.text = listOfNotNull(p.summary(), p.line.takeIf { it.isNotEmpty() }).joinToString("\n")
+        } else {
+            findViewById<View>(R.id.positionDetail).visibility = View.GONE
+        }
+        val kept = KeptPositions.all(this)
+        val list = findViewById<android.widget.LinearLayout>(R.id.kept)
+        list.removeAllViews()
+        list.visibility = if (kept.isEmpty()) View.GONE else View.VISIBLE
+        if (kept.isEmpty()) return
+        val rows = Rows(list)
+        list.addView(TextView(this, null, 0, R.style.Caption).apply {
+            text = "Kept positions (${kept.size}): tap one for what to do with it."
+            setPadding(dp(4f), 0, dp(4f), 0)
+        }, android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT))
+        for (k in kept) rows.action(R.drawable.ic_grid, k.note, k.fen) { askAboutKept(k) }
+        rows.buttons(listOf("Share all", "Clear")) { i ->
+            if (i == 0) startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, KeptPositions.text(kept))
+            }, "Share the kept positions"))
+            else MaterialAlertDialogBuilder(this)
+                .setMessage("Remove the ${kept.size} kept position${if (kept.size == 1) "" else "s"}?")
+                .setNegativeButton("Keep them", null)
+                .setPositiveButton("Remove") { _, _ -> KeptPositions.clear(this); showPositions() }
+                .show()
+        }
+    }
+
+    private fun askAboutKept(k: KeptPositions.Kept) {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(k.note)
+            .setItems(arrayOf("Copy the FEN", "Analyse on the web", "Remove")) { _, which ->
+                when (which) {
+                    0 -> copy("ChessOverlay position", k.fen)
+                    1 -> analyseOnTheWeb(k.fen)
+                    else -> { KeptPositions.remove(this, k.fen); showPositions() }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun copy(label: String, text: String) {
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(label, text))
+        toast("Copied")
+    }
+
+    /** lichess.org's analysis of a position: its address is the FEN with spaces as underscores. */
+    private fun analyseOnTheWeb(fen: String) {
+        try {
+            startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW, Uri.parse("https://lichess.org/analysis/" + fen.replace(' ', '_'))), "Analyse the position"))
+        } catch (e: Exception) {
+            DebugLog.e("Positions", "no app to open an address", e)
+            toast("No browser found")
+        }
+    }
+
     private fun testRecognition() {
         val models = ModelStore(this)
         if (!models.ready) { toast("The recognition models are not here yet"); return }
@@ -252,6 +341,7 @@ class MainActivity : AppCompatActivity() {
             null -> ""
         }
 
+        showPositions()
         val running = OverlayService.running
         start.text = if (running) "Stop overlay" else "Start overlay"
         start.setIconResource(if (running) R.drawable.ic_stop else R.drawable.ic_play)

@@ -335,12 +335,12 @@ class Board private constructor(
         return true
     }
 
-    /** Text for a whole line, e.g. "1. e4 e5 2. Nf3" (or "1... e5 2. Nf3"). A move that is not one ends the line. */
-    fun lineText(pv: List<String>, whiteToMove: Boolean, maxMoves: Int = 8): String {
+    /** Text for a whole line, e.g. "1. e4 e5 2. Nf3" (or "1... e5 2. Nf3"); `firstMove` is the number of the first (the game's, when known). A move that is not one ends the line. */
+    fun lineText(pv: List<String>, whiteToMove: Boolean, maxMoves: Int = 8, firstMove: Int = 1): String {
         val b = copy()
         val sb = StringBuilder()
         var white = whiteToMove
-        var n = 1
+        var n = firstMove
         for ((i, m) in pv.take(maxMoves).withIndex()) {
             if (!isMove(m)) break
             if (white) sb.append("$n. ") else if (i == 0) sb.append("$n... ")

@@ -92,15 +92,9 @@ object Tuner {
         val input = Recognizer.input(Recognizer.boardInput(sample, corners))
 
         fun measure(mode: RecognizerMode, warmUps: Int, runs: Int): Timing {
-            val opts = OrtSession.SessionOptions().also { o ->
-                try {
-                    mode.applyTo(o)
-                } catch (e: Exception) {
-                    o.close()
-                    throw e
-                }
-            }
+            var opts: OrtSession.SessionOptions? = null
             try {
+                opts = OrtSession.SessionOptions().also { mode.applyTo(it) }
                 val session = env.createSession(boardModel.absolutePath, opts)
                 session.use {
                     var out = Recognizer.runBoard(env, session, input)   // the first run loads and tunes the kernels
@@ -116,12 +110,14 @@ object Tuner {
                         abs(reading.confidence - reference.confidence) < 0.1f
                     return Timing(mode, medianMs(times), same)
                 }
+                throw IllegalStateException("unreachable")
             } catch (e: Exception) {
+                // A way that does not work here (no such provider in this build, a model it cannot run): reported, not thrown.
                 return Timing(mode, error = e.message ?: e.javaClass.simpleName)
             } catch (e: LinkageError) {
                 return Timing(mode, error = e.toString())
             } finally {
-                opts.close()
+                opts?.close()
             }
         }
 

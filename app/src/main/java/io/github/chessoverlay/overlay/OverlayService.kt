@@ -2,6 +2,8 @@ package io.github.chessoverlay.overlay
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -80,7 +82,7 @@ class OverlayService : Service() {
     private var cardLp: WindowManager.LayoutParams? = null
     private var engine: EngineHost? = null
     private var recognizer: Recognizer? = null
-    private var analyst: Analyst? = null
+    @Volatile private var analyst: Analyst? = null
     private var density = 1f
     private var screenW = 0
     private var screenH = 0
@@ -285,6 +287,7 @@ class OverlayService : Service() {
         draw?.state = s
         card?.state = s
         s.corners?.let { placeCard(it) }
+        lastPosition = analyst?.position()
     }
 
     // ---- the card ---------------------------------------------------------
@@ -357,6 +360,21 @@ class OverlayService : Service() {
         }
 
         override fun onFold(collapsed: Boolean) { prefs.cardCollapsed = collapsed }
+        override fun onLongPress() = copyPosition()
+    }
+
+    /** A finger kept on the card: the position as a FEN in the clipboard, for pasting anywhere. */
+    private fun copyPosition() {
+        val fen = analyst?.position()?.fen ?: return
+        try {
+            getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("ChessOverlay position", fen))
+            DebugLog.i(TAG, "position copied: $fen")
+            analyst?.flash(COPIED)
+            work.postDelayed({ analyst?.unflash(COPIED) }, FLASH_MS)
+        } catch (e: Exception) {
+            DebugLog.e(TAG, "could not copy the position", e)
+            analyst?.flash("Could not copy the position")
+        }
     }
 
     // ---- auto mode -------------------------------------------------------
@@ -650,6 +668,11 @@ class OverlayService : Service() {
         /** The overlay is on (for the app's Start / Stop button). */
         @Volatile var running = false
             private set
+        /** The position the overlay saw last, for the app's Positions card; it stays after the overlay stops. */
+        @Volatile var lastPosition: Analyst.Position? = null
+            internal set
+        private const val COPIED = "Position copied (FEN)"
+        private const val FLASH_MS = 2500L
         private const val CHANNEL = "overlay"
         private const val TAG = "Overlay"
 

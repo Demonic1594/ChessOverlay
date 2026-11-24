@@ -20,13 +20,20 @@
         <item name="android:navigationBarColor">@color/bg</item>
         <item name="materialCardViewStyle">@style/Card</item>
         <item name="chipStyle">@style/ChoiceChip</item>
+        <item name="tonalButtonStyle">@style/TonalButton</item>
     </style>
+
+    <!-- Where the theme says which style Rows.buttons gives its buttons. -->
+    <attr name="tonalButtonStyle" format="reference" />
 
     <style name="Card" parent="Widget.Material3.CardView.Filled">
         <item name="cardBackgroundColor">@color/surface</item>
         <item name="cardCornerRadius">18dp</item>
         <item name="contentPadding">16dp</item>
     </style>
+
+    <!-- The app's tonal buttons (Change, Options, and the rows Rows.buttons makes). -->
+    <style name="TonalButton" parent="Widget.Material3.Button.TonalButton" />
 
     <style name="ChoiceChip" parent="Widget.Material3.Chip.Filter">
         <item name="chipMinTouchTargetSize">40dp</item>

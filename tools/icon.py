@@ -72,6 +72,47 @@ def polygon_path(points):
     return "M" + " L".join(f"{x:g},{y:g}" for x, y in points) + " Z"
 
 
+def area2(poly):
+    """Twice the signed area: its sign tells which way round a polygon is."""
+    return sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(poly, poly[1:] + poly[:1]))
+
+
+def clip_convex(subject, clip):
+    """The part of the convex polygon `subject` inside the convex polygon `clip` (Sutherland and Hodgman)."""
+    sign = 1 if area2(clip) > 0 else -1
+
+    def side(a, b, p):   # not negative inside
+        return sign * ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]))
+
+    out = subject
+    for a, b in zip(clip, clip[1:] + clip[:1]):
+        if not out:
+            break
+        inp, out = out, []
+        start, start_side = inp[-1], side(a, b, inp[-1])
+        for end in inp:
+            end_side = side(a, b, end)
+            if (end_side >= 0) != (start_side >= 0):
+                t = start_side / (start_side - end_side)
+                out.append((start[0] + t * (end[0] - start[0]), start[1] + t * (end[1] - start[1])))
+            if end_side >= 0:
+                out.append(end)
+            start, start_side = end, end_side
+    return out
+
+
+def with_holes(outer, hole):
+    """`outer` (a convex polygon) with the part of the convex `hole` inside it left out, as one path for the winding
+    rule (the default): the hole's part goes the other way round. The part of the hole outside `outer` is nothing."""
+    path = polygon_path(outer)
+    piece = clip_convex(hole, outer)
+    if len(piece) >= 3 and abs(area2(piece)) > 1e-6:
+        if area2(piece) * area2(outer) > 0:
+            piece = list(reversed(piece))
+        path += " " + polygon_path(piece)
+    return path
+
+
 def vector(name, body):
     return ('<?xml version="1.0" encoding="utf-8"?>\n'
             f'<!-- Made by tools/icon.py: change it there, not here. -->\n'
@@ -110,19 +151,48 @@ def foreground():
 
 
 def monochrome():
-    """The icon in one colour for themed icons: the light squares solid, the dark ones fainter, and the arrow
-    cut out of both so it stays apart from them."""
+    """The icon in one colour for themed icons: the light squares solid, the dark ones fainter, and a band
+    around the arrow left out of both so the arrow stays apart from them. The band is taken out of each square
+    on its own (with_holes), which is right under the winding rule, the default; under the even-odd rule one
+    path of many squares and the band would fill the band again wherever it lies over the other shade."""
     light, dark = squares()
-    x, y, side, r = BOARD
-    hole = polygon_path(arrow(EDGE + 1.2))
+    gap = arrow(EDGE + 1.2)
+
+    def board(cells):
+        return " ".join(with_holes([(cx, cy), (cx + SQUARE, cy), (cx + SQUARE, cy + SQUARE), (cx, cy + SQUARE)], gap)
+                       for cx, cy in cells)
+
     return vector("ic_launcher_mono", (
         '    <group>\n'
-        f'        <clip-path android:pathData="{rounded(x, y, side, r)}" />\n'
-        f'        <path android:pathData="{squares_path(light)} {hole}" android:fillColor="#FFFFFFFF" android:fillType="evenOdd" />\n'
-        f'        <path android:pathData="{squares_path(dark)} {hole}" android:fillColor="#99FFFFFF" android:fillType="evenOdd" />\n'
-        f'        <path android:pathData="{polygon_path(arrow())}" android:fillColor="#FFFFFFFF" />\n'
+        f'        <clip-path android:pathData="{rounded(*BOARD)}" />\n'
+        f'        <path android:pathData="{board(light)}" android:fillColor="#FFFFFFFF" />\n'
+        f'        <path android:pathData="{board(dark)}" android:fillColor="#99FFFFFF" />\n'
         '    </group>\n'
+        f'    <path android:pathData="{polygon_path(arrow())}" android:fillColor="#FFFFFFFF" />\n'
     ))
+
+
+def notification():
+    """The status bar's icon, 24 x 24: a board's rounded shape in half-transparent white with the arrow left
+    out of it (the status bar shows through), and the arrow in white; in one colour, as status bar icons are."""
+    tail, tip, shaft, head_len, head = (8.0, 16.0), (17.0, 7.0), 1.4, 4.6, 2.7
+    # The board: a square of 14 from (7, 5), its corners cut by 2 (a rounded square, as a polygon).
+    outer = [(9.0, 5.0), (19.0, 5.0), (21.0, 7.0), (21.0, 17.0), (19.0, 19.0), (9.0, 19.0), (7.0, 17.0), (7.0, 7.0)]
+    global TAIL, TIP, SHAFT, HEAD_LEN, HEAD
+    save = TAIL, TIP, SHAFT, HEAD_LEN, HEAD
+    TAIL, TIP, SHAFT, HEAD_LEN, HEAD = tail, tip, shaft, head_len, head
+    try:
+        hole, arrow_here = arrow(1.2), arrow()
+    finally:
+        TAIL, TIP, SHAFT, HEAD_LEN, HEAD = save
+    return ('<?xml version="1.0" encoding="utf-8"?>\n'
+            '<!-- Made by tools/icon.py: change it there, not here. -->\n'
+            '<vector xmlns:android="http://schemas.android.com/apk/res/android"\n'
+            '    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">\n'
+            '    <!-- The board as its rounded square, without a band around the arrow (the band shows the status bar). -->\n'
+            f'    <path android:pathData="{with_holes(outer, hole)}" android:fillColor="#FFFFFFFF" android:fillAlpha="0.5" />\n'
+            f'    <path android:pathData="{polygon_path(arrow_here)}" android:fillColor="#FFFFFFFF" />\n'
+            '</vector>\n')
 
 
 ADAPTIVE = '''<?xml version="1.0" encoding="utf-8"?>
@@ -140,6 +210,7 @@ def write():
     (RES / "drawable/ic_launcher_fg.xml").write_text(foreground())
     (RES / "drawable/ic_launcher_mono.xml").write_text(monochrome())
     (RES / "mipmap-anydpi-v26/ic_launcher.xml").write_text(ADAPTIVE)
+    (RES / "drawable/ic_stat_overlay.xml").write_text(notification())
 
 
 def preview(path):
