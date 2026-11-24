@@ -134,21 +134,25 @@ responsible for any penalty, ban or other consequence of misusing this app.
 
 GitHub Actions builds the APK (workflow "Build APK", artifact
 `chessoverlay-apk`) each time a pull request changes, on every push to
-`main`, and by hand. It bundles Smotherfish from the head of the
-[Smotherfish](https://github.com/Demonic1594/Smotherfish) branch
-`smotherfish` as it is when the build runs (the build log names the
-commit); run the workflow by hand to bundle another branch.
+`main`, and by hand. Take the APK of a run on `main`: it is signed with
+the project key, so a newer one installs over an older one. The APK of a
+pull request is signed with a debug key made on the build machine, a new
+one each run, so those do not install over one another.
 
-CI builds are signed with a debug key that the build machine makes for
-itself, a new one on every run. Android does not install an app over one
-signed differently, so a newer CI build does not install over an older
-one: uninstall first (that loses the settings and the engines you
-added), or build locally.
+It bundles Smotherfish built from one commit of the
+[Smotherfish](https://github.com/Demonic1594/Smotherfish) repository, named
+as `ENGINE_REF` in `.github/workflows/build.yml` (the build log names it,
+and `THIRD_PARTY_NOTICES.md` links its source). To bundle another branch,
+tag or commit, run the workflow by hand and give it as `engine_ref`. To
+move the app to a newer engine, change the commit in the workflow and in
+the notices together.
 
 Local build: Android SDK (platform 35), JDK 17+, then `./gradlew assembleRelease`.
-It is signed with your own debug key, so local builds update one another.
 Put an arm64 engine at `app/src/main/jniLibs/arm64-v8a/libsmotherfish.so`
-to bundle it.
+to bundle it. Such a build is signed with the debug key of the build
+machine. To sign with the project key, give the keystore and its passwords
+(`-PsigningStoreFile=… -PsigningStorePassword=… -PsigningKeyAlias=… -PsigningKeyPassword=…`,
+or the environment variables `SIGNING_STORE_FILE` and so on).
 
 ## Tests
 
@@ -213,4 +217,5 @@ the whole pipeline on a screenshot, and a rendering of the overlay
 
 The repository has no licence file yet. Because the APK bundles a GPL-3.0
 engine, distributing the APK means providing that engine's source (the
-Smotherfish repository).
+Smotherfish repository). `THIRD_PARTY_NOTICES.md` lists the licences of
+what the APK contains, and the Smotherfish commit each build is made from.

@@ -3,15 +3,17 @@
 # - apk: Smotherfish for arm64 (Android NDK) bundled as libsmotherfish.so,
 #   the recognition models, the unit tests (the recognizer against
 #   chessimg2pos's recorded Python output), then app-release.apk as an
-#   artifact. It is signed with a debug key made on the build machine, a new
-#   one each run, so one CI build does not install over another (README,
-#   Builds);
+#   artifact. For pushes to main and runs by hand it is signed with the
+#   project key (secrets ANDROID_KEYSTORE_*), so that a newer build installs
+#   over an older one; a pull request's APK with the debug key of the build
+#   machine, a new one each run (README, Builds);
 # - engine-arm64: the engine from that APK on real arm64 hardware, run by the
 #   app's own engine code;
 # - device: the app on an x86_64 emulator, with an x86_64 Smotherfish.
-# The engine is built from ENGINE_REF as it is when the run starts: the head
-# of the Smotherfish branch `smotherfish`, unless the workflow is run by hand
-# with another branch, tag or commit.
+# The engine is built from ENGINE_REF: the commit pinned below, so that a
+# build can be repeated and the APK's engine source is known (see
+# THIRD_PARTY_NOTICES.md), unless the workflow is run by hand with another
+# branch, tag or commit.
 name: Build APK
 
 on:
@@ -26,7 +28,10 @@ on:
         default: "smotherfish"
 
 env:
-  ENGINE_REF: ${{ github.event.inputs.engine_ref || 'smotherfish' }}
+  # The Smotherfish commit bundled by default: the head of its branch
+  # `smotherfish` on 2026-11-23, built and tested by the run of that day.
+  # To move on, change this commit (and THIRD_PARTY_NOTICES.md with it).
+  ENGINE_REF: ${{ github.event.inputs.engine_ref || '33bbe36148e42b08e496027a48dc227212845ebd' }}
   NDK_VERSION: "27.2.12479018"
 
 jobs:
@@ -48,8 +53,10 @@ jobs:
 
       - name: Build Smotherfish (arm64, static)
         run: |
-          git clone -q --depth 1 --branch "$ENGINE_REF" https://github.com/Demonic1594/Smotherfish.git engine \
-            || { git clone -q https://github.com/Demonic1594/Smotherfish.git engine && git -C engine checkout -q "$ENGINE_REF"; }
+          git init -q engine
+          git -C engine remote add origin https://github.com/Demonic1594/Smotherfish.git
+          git -C engine fetch -q --depth 1 origin "$ENGINE_REF"
+          git -C engine checkout -q FETCH_HEAD
           cd engine/src
           make -j"$(nproc)" net
           PATH="$NDK_BIN:$PATH" make -j"$(nproc)" build ARCH=armv8 COMP=ndk EXTRALDFLAGS="-static" > ../build.log 2>&1 \
@@ -93,8 +100,31 @@ jobs:
           MODELS="$GITHUB_WORKSPACE/models" QMODELS="$GITHUB_WORKSPACE/app/src/main/assets/models" \
             ./gradlew --no-daemon :core:test testDebugUnitTest
 
+      # The project's signing key, for the APKs meant for installing (pushes
+      # to main, runs by hand). Not for pull requests: their code could print
+      # it. Without the secrets the build falls back to the debug key.
+      - name: Signing key
+        id: key
+        if: github.event_name != 'pull_request'
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then echo "no signing key: the debug key is used"; exit 0; fi
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/chessoverlay-signing.p12"
+          echo "file=$RUNNER_TEMP/chessoverlay-signing.p12" >> "$GITHUB_OUTPUT"
+
       - name: Build the APK
         run: ./gradlew --no-daemon assembleRelease
+        env:
+          SIGNING_STORE_FILE: ${{ steps.key.outputs.file }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: The APK's signer
+        run: |
+          APKSIGNER="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | tail -1)/apksigner"
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/release/app-release.apk | grep -iE 'certificate SHA-256|Signer #1 certificate DN' | tee -a "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -184,8 +214,10 @@ jobs:
 
       - name: Build Smotherfish (x86_64, for the emulator)
         run: |
-          git clone -q --depth 1 --branch "$ENGINE_REF" https://github.com/Demonic1594/Smotherfish.git engine \
-            || { git clone -q https://github.com/Demonic1594/Smotherfish.git engine && git -C engine checkout -q "$ENGINE_REF"; }
+          git init -q engine
+          git -C engine remote add origin https://github.com/Demonic1594/Smotherfish.git
+          git -C engine fetch -q --depth 1 origin "$ENGINE_REF"
+          git -C engine checkout -q FETCH_HEAD
           cd engine/src
           make -j"$(nproc)" net
           PATH="$NDK_BIN:$PATH" make -j"$(nproc)" build ARCH=x86-64 COMP=ndk EXTRALDFLAGS="-static" > ../build.log 2>&1 \
