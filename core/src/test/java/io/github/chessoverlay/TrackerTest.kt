@@ -150,6 +150,49 @@ class TrackerTest {
         assertEquals(false, forced.whiteToMove)
     }
 
+    @Test fun aFollowedGameRemembersItsMoves() {
+        // 1. e4 a6 2. Nf3 a5 3. Bd3 a4 4. Ke2 a3 5. Ke1 axb2: castling is over.
+        val t = BoardTracker()
+        var b = Board.fromPlacement(start)
+        t.accept(render(b), rec(b), null, strict = true)
+        for (m in listOf("e2e4", "a7a6", "g1f3", "a6a5", "f1d3", "a5a4", "e1e2", "a4a3", "e2e1", "a3b2")) {
+            b = after(b.placement(), m)
+            t.accept(render(b), rec(b), null, strict = true)
+        }
+        assertEquals("rnbqkbnr/1ppppppp/8/8/4P3/3B1N2/PpPP1PPP/RNBQK2R w kq - 0 1", t.board!!.fen(true))
+        // 1. e4 a6 2. e5 d5: the engine is told that d6 can be taken en passant.
+        val u = BoardTracker()
+        var c = Board.fromPlacement(start)
+        u.accept(render(c), rec(c), null, strict = true)
+        for (m in listOf("e2e4", "a7a6", "e4e5", "d7d5")) {
+            c = after(c.placement(), m)
+            u.accept(render(c), rec(c), null, strict = true)
+        }
+        assertEquals("rnbqkbnr/1pp1pppp/p7/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1", u.board!!.fen(true))
+    }
+
+    @Test fun steppingBackReadsThePiecesAnew() {
+        // 1. e4 a6 2. Ke2: the king moved, castling is over ...
+        val t = BoardTracker()
+        var b = Board.fromPlacement(start)
+        val first = after(start, "e2e4", "a7a6")   // before the king moved
+        t.accept(render(b), rec(b), null, strict = true)
+        for (m in listOf("e2e4", "a7a6", "e1e2")) {
+            b = after(b.placement(), m)
+            t.accept(render(b), rec(b), null, strict = true)
+        }
+        assertEquals("kq", t.board!!.castling())
+        // ... but one ply back the king has not moved yet and still may. That
+        // position is known from its pieces only, as after a jump in the move list.
+        t.accept(render(first), rec(first), null, strict = true)
+        assertEquals("KQkq", t.board!!.castling())
+        // A jump of several plies to a position no move explains is read twice, then taken.
+        val jump = t.accept(render(Board.fromPlacement(start)), rec(Board.fromPlacement(start)), null, strict = true)
+        assertTrue(jump is BoardTracker.Result.Invalid)
+        t.accept(render(Board.fromPlacement(start)), rec(Board.fromPlacement(start)), null, strict = true)
+        assertEquals("$start w KQkq - 0 1", t.board!!.fen(true))
+    }
+
     @Test fun inCheckSideMustMove() {
         val t = BoardTracker()
         val b = Board.fromPlacement("4k3/8/8/8/8/8/8/K3R3")  // black in check

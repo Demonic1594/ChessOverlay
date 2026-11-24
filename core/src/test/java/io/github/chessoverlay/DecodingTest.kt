@@ -104,6 +104,13 @@ class DecodingTest {
         assertNull(PositionDecoder.decode(prev, false, false, rec(after(start, "e2e4"), false)))
     }
 
+    @Test fun castlingIsOutOfReachOnceTheRightIsGone() {
+        val prev = after(start, "e2e4", "a7a6", "g1f3", "a6a5", "f1d3", "a5a4", "e1e2", "a4a3", "e2e1", "a3b2")
+        assertEquals("kq", prev.castling())
+        // The screen shows the king on g1 and the rook on f1: no move leads there.
+        assertNull(PositionDecoder.decode(prev, true, false, rec(after(prev, "e1g1"), false)))
+    }
+
     @Test fun aPieceHiddenUnderASiteArrowDoesNotVanish() {
         val prev = after(start, "e2e4", "e7e5", "g1f3")
         // No move; the site draws an arrow over the f3 knight, read (99% sure) as empty.

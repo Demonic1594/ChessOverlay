@@ -81,8 +81,17 @@ responsible for any penalty, ban or other consequence of misusing this app.
   moment the board is still, within a few milliseconds and before the board
   recognizer runs; the arrows come back as soon as the clean capture is
   taken, and the recognizer then checks the move on it and corrects it if
-  it was wrong (logged). When no single move explains the change, the
-  recognizer decides, as before.
+   it was wrong (logged). When no single move explains the change, the
+   recognizer decides, as before.
+- **A game is remembered**: in a game the overlay follows move by move,
+  the moves are kept. A king or rook that has moved cannot castle any
+  more (a rook taken on its square, or one that arrives there later,
+  does not bring the right back), so the engine is never offered
+  castling it does not have; after a pawn's double step it is told the
+  square a capture en passant could land on. Castling out of check, or
+  across an attacked square, is not taken for a legal move, so a
+  checkmate with the king and a rook still on their squares is said on
+  the card instead of leaving it on "Analysing…".
 - **Steady display**: engine lines are shown as whole iterations (every
   line at one depth), from depth 8 (shallower ones after 150 ms, so an
   engine whose depth is capped by a strength limit is shown too); below depth 18 a change of the arrows is
@@ -173,10 +182,16 @@ the whole pipeline on a screenshot, and a rendering of the overlay
   it wrote itself, and loading your own engines depends on that (DroidFish
   does the same). Such apps can be sideloaded but not published on Google
   Play.
-- Recognition reads the pieces, not the move history: castling rights are
-  inferred from king and rook positions, en passant is not known, and in
-  manual mode the side to move is the side at the bottom unless a king is
-  in check (⇅ overrides it).
+- Recognition reads the pieces, not the move history. In a game the
+  overlay follows move by move, the moves are kept: a king or rook that
+  has moved cannot castle any more (the engine is no longer told it can),
+  and the engine is told when a capture en passant is possible. A position
+  it jumps to (the move list, a game joined late) is known from its pieces
+  only: castling is then taken to be possible while king and rook stand on
+  their squares, and whether a pawn has just advanced two squares is not
+  known. Stepping back one ply in a move list, or an undo, leaves the
+  side to move wrong until the next move. In manual mode the side to move
+  is the side at the bottom unless a king is in check (⇅ overrides it).
 
 ## Credits and licences
 

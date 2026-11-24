@@ -22,6 +22,56 @@ class BoardTest {
         assertEquals("Kq", b.castling())
     }
 
+    /** A game from `p`: the board after `moves` were played. */
+    private fun game(p: String, vararg moves: String) = Board.fromPlacement(p).also { b -> moves.forEach { b.play(it) } }
+
+    @Test fun castlingRightsFollowTheMoves() {
+        // 1. e4 a6 2. Nf3 a5 3. Bd3 a4 4. Ke2 a3 5. Ke1 axb2: the king is back
+        // on e1, and may no longer castle.
+        val walked = game(start, "e2e4", "a7a6", "g1f3", "a6a5", "f1d3", "a5a4", "e1e2", "a4a3", "e2e1", "a3b2")
+        assertEquals("rnbqkbnr/1ppppppp/8/8/4P3/3B1N2/PpPP1PPP/RNBQK2R w kq - 0 1", walked.fen(true))
+        assertFalse("e1g1" in walked.legalMoves(true))
+        // 1. h4 a6 2. Rh3 a5 3. Rh1 a4: the rook is back too; its side is gone.
+        assertEquals("rnbqkbnr/1ppppppp/8/8/p6P/8/PPPPPPP1/RNBQKBNR w Qkq - 0 1",
+            game(start, "h2h4", "a7a6", "h1h3", "a6a5", "h3h1", "a5a4").fen(true))
+        // 1. a4 Ke7 2. h4 Ke8 3. Ra3 Bxh1 4. Rh3 Be4 5. Rh1 Bc6: the rook on h1
+        // now is the one from a1. It does not bring castling back.
+        val taken = game("4k3/8/2b5/8/8/8/P6P/R3K2R",
+            "a2a4", "e8e7", "h2h4", "e7e8", "a1a3", "c6h1", "a3h3", "h1e4", "h3h1", "e4c6")
+        assertEquals("4k3/8/2b5/8/P6P/8/8/4K2R w - - 0 1", taken.fen(true))
+        assertFalse("e1g1" in taken.legalMoves(true))
+    }
+
+    @Test fun castlingNeedsTheRightAndASafeKing() {
+        // Not out of check, and not across an attacked square.
+        assertFalse("e1g1" in Board.fromPlacement("4k3/8/8/8/8/8/4r3/4K2R").legalMoves(true))
+        assertFalse("e1g1" in Board.fromPlacement("5r1k/8/8/8/8/8/8/4K2R").legalMoves(true))
+        assertFalse("e1c1" in Board.fromPlacement("3r3k/8/8/8/8/8/8/R3K2R").legalMoves(true))
+        // A square only the rook crosses may be attacked.
+        assertTrue("e1c1" in Board.fromPlacement("1r4k1/8/8/8/8/8/8/R3K2R").legalMoves(true))
+        // With the right gone there is no castling, however safe the king.
+        val walked = game(start, "e2e4", "a7a6", "g1f3", "a6a5", "f1d3", "a5a4", "e1e2", "a4a3", "e2e1", "a3b2")
+        assertEquals("kq", walked.castling())
+        assertFalse("e1g1" in walked.legalMoves(true))
+    }
+
+    @Test fun enPassantSquare() {
+        // 1. e4 a6 2. e5 d5: White may take on d6, and the engine is told so.
+        val now = game(start, "e2e4", "a7a6", "e4e5", "d7d5")
+        assertEquals("rnbqkbnr/1pp1pppp/p7/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1", now.fen(true))
+        assertTrue("e5d6" in now.legalMoves(true))
+        assertEquals("rnbqkbnr/1pp1pppp/p2P4/8/8/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+            game(start, "e2e4", "a7a6", "e4e5", "d7d5", "e5d6").fen(false))
+        // A double step nobody can take is not reported, as engines do not report it.
+        assertEquals("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", game(start, "e2e4").fen(false))
+        // 1. e4 d5 2. e5 a6 3. a5: the pawn on d5 stopped moving long ago.
+        val late = game(start, "e2e4", "d7d5", "e4e5", "a7a6", "a6a5")
+        assertFalse("e5d6" in late.legalMoves(true))
+        assertEquals("rnbqkbnr/1pp1pppp/8/p2pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1", late.fen(true))
+        // A position read from the screen alone has no history: the capture is assumed possible.
+        assertTrue("e5d6" in Board.fromPlacement(late.placement()).legalMoves(true))
+    }
+
     @Test fun attacksAndCheck() {
         // Black king on e8 checked by a rook on e1 (white king elsewhere).
         val b = Board.fromPlacement("4k3/8/8/8/8/8/8/K3R3")
@@ -157,6 +207,8 @@ class CardLayoutTest {
         assertEquals("Checkmate: White wins", Board.fromPlacement("8/8/6R1/3P4/1kP1N3/pP5P/P2B2P1/5K2").outcome(false))
         assertEquals("Stalemate: a draw", Board.fromPlacement("7k/5Q2/6K1/8/8/8/8/8").outcome(false))
         assertEquals("Checkmate: Black wins", Board.fromPlacement("rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR").outcome(true))
+        // Qe2#, with the king and rook on their squares: castling out of check is no way out.
+        assertEquals("Checkmate: Black wins", Board.fromPlacement("k7/8/8/8/2b5/8/PPPPqPPP/1N2K2R").outcome(true))
         assertNull(Board.fromPlacement("8/8/6R1/3P4/1kP1N3/pP5P/P2B2P1/5K2").outcome(true))
         assertNull(Board.fromPlacement("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR").outcome(true))
     }

@@ -20,6 +20,9 @@ import kotlin.math.max
  *   just played; a jump of several moves or a new game falls back to the
  *   colour that left squares, then to the side at the bottom. Two moves at
  *   once (a quick reply) are found too and keep the side to move.
+ * - What only the moves show goes with them: a linked position is the last
+ *   one after its move, so it keeps the castling rights and the en passant
+ *   square (see Board); a jump, or a step back, is read from its pieces.
  * - Moves seen at once ([explainChange]): which squares changed, and the
  *   legal moves, usually leave exactly one move (or a move and its reply)
  *   that explains them. That is known within a millisecond of the board
@@ -242,11 +245,28 @@ class BoardTracker {
             if (strict) PositionDecoder.TAU_FOLLOWING else PositionDecoder.TAU_BY_HAND) else null
         val black = decoded?.blackAtBottom
             ?: Orientation.decide(rec.drawn, rec.blackBottomP, prior = if (prev != null) blackAtBottom else null)
-        val b = decoded?.board ?: try {
+        val read = decoded?.board ?: try {
             Board.fromPlacement(Orientation.whiteView(rec.drawn, black))
         } catch (e: IllegalArgumentException) {
             return Result.Invalid(e.message ?: "bad board")
         }
+        // How the game got here: one move, or a move each (a quick reply).
+        val moves: List<String>? = decoded?.moves ?: prev?.let { p ->
+            Board.findMove(p, read)?.let { listOf(it) } ?: Board.findTwoMoves(p, read, prevWhite)?.toList()
+        }
+        // A move is played by the side to move. One that seems to be played by
+        // the other side is a piece going back where it came from: a step back
+        // in the move list, or an undo. The position before it is not "the last
+        // one after a move", so only its pieces are known, as after a jump.
+        val forward = moves.isNullOrEmpty() || prev == null ||
+            prev[Board.squareOf(moves[0].substring(0, 2))].isUpperCase() == prevWhite
+        // With a move, the new position is the old one after it: that keeps
+        // what a picture cannot show (the castling rights, the en passant
+        // square).
+        val b = if (moves != null && moves.isNotEmpty()) {
+            if (forward && prev != null) prev.copy().also { x -> moves.forEach { x.play(it) } }
+            else Board.fromPlacement(read.placement())
+        } else read
         val sameBoard = prev != null && prev.placement() == b.placement()
         if (sameBoard && sideOverride == null) {
             // The same position (perhaps turned round): the same game.
@@ -256,10 +276,6 @@ class BoardTracker {
             return Result.Same
         }
 
-        // How the game got here: one move, or a move each (a quick reply).
-        val moves: List<String>? = decoded?.moves ?: prev?.let { p ->
-            Board.findMove(p, b)?.let { listOf(it) } ?: Board.findTwoMoves(p, b, prevWhite)?.toList()
-        }
         if (prev != null && moves == null && strict && sideOverride == null) {
             val diff = (0..63).count { prev[it] != b[it] }
             if (diff <= SMALL_CHANGE && suspect != b.placement()) {
