@@ -1,6 +1,7 @@
 package io.github.chessoverlay
 
 import io.github.chessoverlay.vision.Img
+import org.json.JSONObject
 import io.github.chessoverlay.vision.Recognizer
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
