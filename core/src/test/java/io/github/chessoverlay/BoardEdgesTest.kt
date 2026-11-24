@@ -84,6 +84,15 @@ class BoardEdgesTest {
         assertBox(img, box(55, 86, 366, 390), 60f, 80f, 360f, 380f)
     }
 
+    @Test fun whatTheLocatorMissedOfTheBoard() {
+        // The locator missed a column: its box is not square, and the edges are looked for further out.
+        assertBox(picture(), box(97, 80, 360, 380), 60f, 80f, 360f, 380f)
+        // Two columns and a rank: the band of page beyond the left and the bottom would lie on the board, so the
+        // page is what the right and the top show; the left edge is too far off to be found, and lies a side's
+        // length from the right one.
+        assertBox(picture(), box(120, 80, 360, 343), 60f, 80f, 360f, 380f)
+    }
+
     @Test fun aBoardThatSpansTheWidthOfThePicture() {
         // As on a phone: 10 px of page on either side of the board, so neither vertical edge has page beyond it.
         val img = picture(w = 320, h = 440, x0 = 10, y0 = 70, side = 300)
