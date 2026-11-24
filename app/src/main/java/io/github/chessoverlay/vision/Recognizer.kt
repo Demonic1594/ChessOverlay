@@ -18,7 +18,7 @@ import kotlin.math.roundToInt
  * Runtime has both). Which is fastest differs per phone; [Tuner] measures.
  * [toString] is the saved form, as "cpu:2".
  */
-class RecognizerMode(val provider: String = CPU, val threads: Int = DEFAULT_THREADS) {
+data class RecognizerMode(val provider: String = CPU, val threads: Int = DEFAULT_THREADS) {
 
     /** Sets this on `opts`; throws IllegalArgumentException when it is not available in this ONNX Runtime. */
     fun applyTo(opts: OrtSession.SessionOptions) {

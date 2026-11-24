@@ -151,12 +151,21 @@ class OverlayService : Service() {
         }
     }
 
+    private var lastError: String? = null
+    private var lastErrorAt = 0L
+
     private fun guarded(what: String, block: () -> Unit) {
         try {
             block()
         } catch (e: Throwable) {
             DebugLog.e(TAG, "$what failed", e)
-            postState(OverlayState(status = "Error ($what): ${e.message}"))
+            // The same error at every board check would flicker the card with
+            // it (and hide the lines each time): it is shown again only after two seconds.
+            val message = "Error ($what): ${e.message}"
+            val now = SystemClock.uptimeMillis()
+            if (message != lastError || now - lastErrorAt > 2000) postState(OverlayState(status = message))
+            lastError = message
+            lastErrorAt = now
         }
     }
 
@@ -461,6 +470,7 @@ class OverlayService : Service() {
             false
         }
         cleanCapture(hideCard = !auto) { img ->
+          try {
             // Taken: the new position's arrows may show while the recognizer checks it.
             if (fast) main.post { draw?.blank = false }
             guarded("analyse") {
@@ -493,7 +503,10 @@ class OverlayService : Service() {
             }
             // The new state (if any) was posted first; now the arrows may show again.
             main.post { draw?.blank = false }
+          } finally {
+            // Even if the thread's last act was an error: a busy overlay reads nothing more.
             busy = false
+          }
         }
     }
 

@@ -208,10 +208,15 @@ class MainActivity : AppCompatActivity() {
             val p = OverlayService.lastPosition ?: return@buttons
             if (i == 0) copy("ChessOverlay position", p.fen) else copy("ChessOverlay line", p.text())
         }
-        actions.buttons(listOf("Analyse on the web", "Keep")) { i ->
+        actions.buttons(listOf("Analyse online", "Keep")) { i ->
             val p = OverlayService.lastPosition ?: return@buttons
             if (i == 0) analyseOnTheWeb(p.fen) else { KeptPositions.add(this, p); toast("Kept (${KeptPositions.all(this).size})"); showPositions() }
         }
+        // Under the buttons: where "Analyse online" opens the position.
+        val where = TextView(this, null, 0, R.style.Caption)
+        where.text = "Analyse online opens the position in lichess.org's analysis, in a browser or in its app."
+        where.setPadding(dp(4f), 0, dp(4f), 0)
+        findViewById<android.widget.LinearLayout>(R.id.positionActions).addView(where)
     }
 
     /** The card as the last position and the kept ones are now; called each time the screen shows. */
@@ -257,7 +262,7 @@ class MainActivity : AppCompatActivity() {
     private fun askAboutKept(k: KeptPositions.Kept) {
         MaterialAlertDialogBuilder(this)
             .setTitle(k.note)
-            .setItems(arrayOf("Copy the FEN", "Analyse on the web", "Remove")) { _, which ->
+            .setItems(arrayOf("Copy the FEN", "Analyse online (lichess.org)", "Remove")) { _, which ->
                 when (which) {
                     0 -> copy("ChessOverlay position", k.fen)
                     1 -> analyseOnTheWeb(k.fen)
@@ -323,9 +328,11 @@ class MainActivity : AppCompatActivity() {
     // ---- setup checklist ---------------------------------------------------
 
     private fun refresh() {
+        // How the models are run on this phone, once it was measured (see Tuner).
+        val way = if (prefs.recognizerTuned) " · reads with ${prefs.recognizerMode ?: "cpu:2"}" else ""
         when {
-            models.isBundled -> modelsRow.set(CheckRow.State.OK, "Built in")
-            models.ready -> modelsRow.set(CheckRow.State.OK, "Downloaded")
+            models.isBundled -> modelsRow.set(CheckRow.State.OK, "Built in$way")
+            models.ready -> modelsRow.set(CheckRow.State.OK, "Downloaded$way")
             downloading -> modelsRow.set(CheckRow.State.BUSY, "Downloading…")
             else -> modelsRow.set(CheckRow.State.TODO, "One download, about 170 MB", "Download") { downloadModels() }
         }
