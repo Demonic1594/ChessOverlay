@@ -102,6 +102,57 @@ class DeviceTest {
         storage.openOutputFile(name).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
+    /**
+     * The app icon as a launcher shows it (in a round mask, on a light and on a
+     * dark wallpaper), its foreground on its own, the monochrome layer as themed
+     * icons use it, and the status bar's icon: PNGs for review. The shapes are
+     * made by tools/icon.py; this shows what Android makes of them.
+     */
+    @Test fun appIconRenders() {
+        val icon = ctx.getDrawable(R.mipmap.ic_launcher)
+        assertTrue("the launcher icon is not an adaptive icon", icon is android.graphics.drawable.AdaptiveIconDrawable)
+        val adaptive = icon as android.graphics.drawable.AdaptiveIconDrawable
+        icon.setBounds(0, 0, 432, 432)
+        val circle = android.graphics.Path().apply { addCircle(216f, 216f, 144f, android.graphics.Path.Direction.CW) }
+        fun png(name: String, size: Int, wallpaper: Int, draw: (Canvas) -> Unit) {
+            val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val c = Canvas(bmp)
+            c.drawColor(wallpaper)
+            draw(c)
+            storage.openOutputFile(name).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+        for ((name, paper) in listOf("icon.png" to Color.rgb(0xE9, 0xEC, 0xEF), "icon_dark.png" to Color.rgb(0x17, 0x1A, 0x1F))) {
+            png(name, 432, paper) { c ->
+                c.save()
+                c.clipPath(circle)
+                icon.draw(c)
+                c.restore()
+            }
+        }
+        // The foreground alone: the whole 108 x 108 it is drawn on.
+        png("icon_layer.png", 540, Color.rgb(0x1B, 0x24, 0x33)) { c ->
+            c.translate(54f, 54f)
+            adaptive.foreground.draw(c)
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            val mono = adaptive.monochrome
+            assertTrue("no monochrome layer (themed icons)", mono != null)
+            mono!!.setTint(0xFF2A3340.toInt())
+            mono.setTintMode(android.graphics.PorterDuff.Mode.SRC_IN)
+            png("icon_themed.png", 432, Color.rgb(0xE3, 0xE7, 0xED)) { c ->
+                c.save()
+                c.clipPath(circle)
+                mono.draw(c)
+                c.restore()
+            }
+        }
+        png("notification_icon.png", 384, Color.rgb(0x1A, 0x1D, 0x23)) { c ->
+            val small = ctx.getDrawable(R.drawable.ic_stat_overlay)!!
+            small.setBounds(48, 48, 336, 336)
+            small.draw(c)
+        }
+    }
+
     @Test fun bundledEngineAnalysesOnAndroid() {
         val reg = EngineRegistry(ctx)
         val engine = reg.bundled().firstOrNull()

@@ -154,6 +154,11 @@ machine. To sign with the project key, give the keystore and its passwords
 (`-PsigningStoreFile=… -PsigningStorePassword=… -PsigningKeyAlias=… -PsigningKeyPassword=…`,
 or the environment variables `SIGNING_STORE_FILE` and so on).
 
+The app icon is made by `tools/icon.py`: it writes the adaptive icon's three
+vector drawables (background, foreground, and the monochrome layer that
+themed icons use) and the status bar's icon from one description, and with
+Pillow draws a preview (`python3 tools/icon.py --preview build/icon.png`).
+
 ## Tests
 
 The code is split in two modules: `core` (plain Kotlin: chess rules, UCI
