@@ -28,6 +28,13 @@ responsible for any penalty, ban or other consequence of misusing this app.
   int8 (`tools/quantize_models.py`): the same reading as the original on
   every square of 300 benchmark boards, about twice as fast, 38 MB instead
   of 125 MB. (A build without them downloads the originals once.)
+- **Reading speed, measured on the phone**: most of the time of a read is
+  the board model's, and which way of running it is fastest differs per
+  phone. The first time the overlay starts, it times a read of a board
+  each way (ONNX Runtime's own CPU code with one, two or four threads;
+  XNNPACK; NNAPI), with the engine searching as it will be then, and keeps
+  the fastest that reads the board as the default does. Help and debug →
+  Test recognition shows the table and measures again.
 - **Reading in the light of the game**: during a game a new position can
   only follow the last one by a move, or a move each, so the most likely
   position the game can reach is taken when the picture allows it (a piece
@@ -92,12 +99,20 @@ responsible for any penalty, ban or other consequence of misusing this app.
   across an attacked square, is not taken for a legal move, so a
   checkmate with the king and a rook still on their squares is said on
   the card instead of leaving it on "Analysing…".
+- **Positions to take along**: a finger kept on the floating card copies
+  the position's FEN. The app's Positions card shows the last position the
+  overlay saw, its FEN and the engine's line: copy either, open the
+  position in lichess's analysis, or keep it; kept positions can be
+  shared as text.
 - **Steady display**: engine lines are shown as whole iterations (every
   line at one depth), from depth 8 (shallower ones after 150 ms, so an
   engine whose depth is capped by a strength limit is shown too); below depth 18 a change of the arrows is
   shown only when two iterations agree (an engine often switches for one
   iteration and back); the same position's updates reach the screen about
-  twice a second; the card keeps its size from move to move, showing the
+  twice a second; next to the depth the card says how often the position
+  came up and the number of the move (when the game was followed from its
+  start), as far as the card is wide; the card keeps its size from move
+  to move, showing the
   last lines faded until the new ones arrive; while a move is read the
   arrows stay away, so the old ones never flash back before the new ones.
   Results of an old position can never land on a new one.
@@ -122,13 +137,19 @@ responsible for any penalty, ban or other consequence of misusing this app.
 4. Tap **Start overlay** and allow screen capture, then open the app with
    the board. The floating card: ▶ analyse now · A auto mode · ⇅ side to
    move (auto / White / Black) · ◐ show/hide the arrows · ✕ close; drag it
-   by any part; tap the lines to fold them.
+   by any part; tap the lines to fold them; keep a finger on it to copy
+   the position (its FEN) for pasting anywhere.
 5. Settings take effect the next time the overlay starts; the board preview
    in "On the board" shows the drawing with your settings at once.
 6. If a read goes wrong: Help and debug → Copy the debug log, and Share the
    last misread screen (the screen a read failed on, as the app saw it).
    If no lines appear: Help and debug → Test the engine runs it with your
-   options for a few seconds and says what it did (and logs it).
+   options for a few seconds and says what it did (and logs it). To see how
+   long a read takes on this phone: Help and debug → Test recognition.
+7. Positions: the app's Positions card has the last position the overlay
+   saw (it stays after the overlay stops): copy its FEN or the engine's
+   line, open it in lichess's analysis, or keep it. Kept positions are
+   listed below it, to share as text or to remove.
 
 ## Builds
 
@@ -191,8 +212,20 @@ CI runs that engine test on a real arm64 machine too (`engine-arm64`: the
 engine from the APK, 4 threads as on a phone), and
 `connectedDebugAndroidTest` on an x86_64 emulator with an x86_64
 build of Smotherfish: the main screen, the engine on Android, recognition and
-the whole pipeline on a screenshot, and a rendering of the overlay
-(`device-test-output` artifact).
+the whole pipeline on a screenshot, recognition measured each way of
+running the models, and renderings of the overlay, of the app icon and of
+the Positions card (`device-test-output` artifact). The emulator is
+Android 14.
+
+Compiling where the Android Gradle plugin cannot run (on a phone, say):
+`python3 tools/compile.py` compiles the Kotlin of core, of the app and of
+both of its test sets with the standalone Kotlin compiler and Android's
+`android.jar` (about 300 MB under `build/toolchain`, then a few seconds);
+`--run` also runs core's tests. It needs JDK 17 or later, and
+`tools/compile-classpath.txt`: the app's classpaths as Gradle resolves them.
+The build workflow writes them as its artifact `compile-classpath`; copy
+that file there when a dependency changes. It checks that the code
+compiles: resources are not compiled and nothing of Android runs.
 
 ## Notes
 
@@ -207,8 +240,9 @@ the whole pipeline on a screenshot, and a rendering of the overlay
   it jumps to (the move list, a game joined late) is known from its pieces
   only: castling is then taken to be possible while king and rook stand on
   their squares, and whether a pawn has just advanced two squares is not
-  known. Stepping back one ply in a move list, or an undo, leaves the
-  side to move wrong until the next move. In manual mode the side to move
+  known. A step back in the move list, or an undo, takes the position as
+  the game had it, as far back as the game was followed. In manual mode
+  the side to move
   is the side at the bottom unless a king is in check (⇅ overrides it).
 
 ## Credits and licences
