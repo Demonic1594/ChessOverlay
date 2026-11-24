@@ -132,12 +132,21 @@ responsible for any penalty, ban or other consequence of misusing this app.
 
 ## Builds
 
-GitHub Actions builds the APK on every push (workflow "Build APK"; artifact
-`chessoverlay-apk`). It bundles Smotherfish from the
+GitHub Actions builds the APK (workflow "Build APK", artifact
+`chessoverlay-apk`) each time a pull request changes, on every push to
+`main`, and by hand. It bundles Smotherfish from the head of the
 [Smotherfish](https://github.com/Demonic1594/Smotherfish) branch
-`smotherfish` by default; run the workflow by hand to bundle another branch.
+`smotherfish` as it is when the build runs (the build log names the
+commit); run the workflow by hand to bundle another branch.
+
+CI builds are signed with a debug key that the build machine makes for
+itself, a new one on every run. Android does not install an app over one
+signed differently, so a newer CI build does not install over an older
+one: uninstall first (that loses the settings and the engines you
+added), or build locally.
 
 Local build: Android SDK (platform 35), JDK 17+, then `./gradlew assembleRelease`.
+It is signed with your own debug key, so local builds update one another.
 Put an arm64 engine at `app/src/main/jniLibs/arm64-v8a/libsmotherfish.so`
 to bundle it.
 

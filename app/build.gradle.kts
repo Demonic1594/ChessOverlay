@@ -32,7 +32,9 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Sideloaded builds: sign with the debug key unless a real one is configured.
+            // Sideloaded builds: signed with the debug keystore. CI configures
+            // no other, so every run makes a new key and its APK does not
+            // install over an older CI build (README, Builds).
             signingConfig = signingConfigs.getByName("debug")
         }
     }

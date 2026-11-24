@@ -1,6 +1,17 @@
-# Builds the APK: Smotherfish for arm64 (Android NDK) bundled as
-# libsmotherfish.so, unit tests (including the recognizer against
-# chessimg2pos's Python output), then app-release.apk as an artifact.
+# Builds and tests the APK. Runs for pull requests, pushes to main and by
+# hand; the jobs:
+# - apk: Smotherfish for arm64 (Android NDK) bundled as libsmotherfish.so,
+#   the recognition models, the unit tests (the recognizer against
+#   chessimg2pos's recorded Python output), then app-release.apk as an
+#   artifact. It is signed with a debug key made on the build machine, a new
+#   one each run, so one CI build does not install over another (README,
+#   Builds);
+# - engine-arm64: the engine from that APK on real arm64 hardware, run by the
+#   app's own engine code;
+# - device: the app on an x86_64 emulator, with an x86_64 Smotherfish.
+# The engine is built from ENGINE_REF as it is when the run starts: the head
+# of the Smotherfish branch `smotherfish`, unless the workflow is run by hand
+# with another branch, tag or commit.
 name: Build APK
 
 on:
