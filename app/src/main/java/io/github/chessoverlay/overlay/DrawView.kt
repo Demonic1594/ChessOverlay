@@ -10,27 +10,23 @@ import io.github.chessoverlay.vision.BoardTracker
  * [BoardLayer]); everything else is in the floating card.
  *
  * It redraws only when the board drawing really changes (a new best move,
- * a new path), not on every engine update, and it can say which screen
- * pixels it covers: the current drawing and the one before it, since a
- * captured frame may still show that for a moment.
+ * a new path), not on every engine update (see [BoardDrawing]), and it can
+ * say which screen pixels it covers: the current drawing and the one before
+ * it, since a captured frame may still show that for a moment.
  */
 class DrawView(ctx: Context, private val style: () -> BoardStyle) : View(ctx) {
     private val renderer = ShapeRenderer()
+    private val drawing = BoardDrawing(style, renderer)
     private val loc = IntArray(2)
     @Volatile private var shapes: List<Shape> = emptyList()
     @Volatile private var current: ShapeCover? = null
     @Volatile private var previous: ShapeCover? = null
     @Volatile private var replacedAt = 0L
-    private var key: String? = null
 
     var state: OverlayState = OverlayState()
         set(v) {
             field = v
-            val st = style()
-            val k = signature(v, st)
-            if (k == key) return
-            key = k
-            replace(BoardLayer.build(v, st, renderer))
+            if (drawing.show(v)) replace(drawing.shapes)
         }
 
     /**
@@ -44,6 +40,7 @@ class DrawView(ctx: Context, private val style: () -> BoardStyle) : View(ctx) {
     fun clear(): Boolean {
         val now = android.os.SystemClock.uptimeMillis()
         val recent = shapes.isNotEmpty() || now - replacedAt < RECENT_MS
+        drawing.clear()
         replace(emptyList())
         return recent
     }
@@ -78,21 +75,5 @@ class DrawView(ctx: Context, private val style: () -> BoardStyle) : View(ctx) {
     companion object {
         private const val PREVIOUS_MS = 500L
         private const val RECENT_MS = 100L
-
-        /** What the board drawing depends on: same signature, same picture. */
-        fun signature(s: OverlayState, st: BoardStyle): String {
-            val k = s.corners ?: return ""
-            val sb = StringBuilder()
-            for (p in k) sb.append(p[0].toInt()).append(',').append(p[1].toInt()).append(';')
-            sb.append(s.blackAtBottom).append(s.whiteToMove).append(s.provisional).append(st)
-            s.board?.let { sb.append(it.placement()) }
-            s.lastMove?.let { sb.append(it.square).append(it.label) }
-            for ((i, l) in s.lines.take(st.arrows.coerceAtLeast(1)).withIndex()) {
-                val n = if (i == 0) st.pathPlies + 1 else 1
-                sb.append('|').append(l.pv.take(n).joinToString(" "))
-                if (st.arrowLabels) sb.append(l.scoreText(s.whiteToMove))
-            }
-            return sb.toString()
-        }
     }
 }
