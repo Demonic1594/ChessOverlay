@@ -3,6 +3,9 @@
 board.onnx gets its matrix weights in int8 (dynamic quantization, per
 channel): on a benchmark of 300 boards it gave the same reading as the
 original on every square, about twice as fast, and 38 MB instead of 125 MB.
+On one square of the test images (QuantizedModelTest), where the original
+itself hesitates between a rook and a pawn, the int8 model reads either
+way depending on the CPU; the test leaves such squares out.
 locator.onnx (mostly convolutions, little to gain) is copied as it is.
 
 Usage: python3 quantize_models.py SRC_DIR DST_DIR
