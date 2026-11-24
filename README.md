@@ -193,9 +193,13 @@ recognizer, engine processes, views).
 tracking and change detection (including that the overlay's own drawing is
 never taken for a move, and a simulation of gliding pieces: read soon after
 they stop, never in flight), orientation and game-aware decoding (misread
-squares, boards turned round, undo), steady lines, the card's layout
-(nothing runs past it at any width), the engine watchdog (a fake engine that
-only answers on one thread gets restarted until it does), and renders
+squares, boards turned round, undo), the game's memory (a step back is
+exact; repetitions; the move's number; castling rights, the en passant
+square and the halfmove clock across a game, as python-chess counts them),
+what `play` refuses, steady lines, the card's layout (nothing runs past it
+at any width), the engine watchdog (a fake engine that only answers on one
+thread gets restarted until it does; "bestmove (none)" is passed on), the
+debug log, and renders
 previews of the overlay on a phone-sized board to `core/build/preview/*.png`.
 With `ENGINE_BIN=/path/to/engine` (and optionally `ENGINE_THREADS`) it also
 runs the app's engine code (EngineHost, UciEngine) against a real engine on
@@ -208,7 +212,11 @@ three positions, the way the overlay does.
   the same positions, orientation and board corners (within 2 px), and with
   `QMODELS` the bundled int8 model reading every image as the original does;
 - the engine supervisor (a killed engine restarts and the analysis
-  finishes; a position that kills it is skipped).
+  finishes; a position that kills it is skipped);
+- a move seen at once with the real recognizer (`FastReadTest`);
+- the tuner against the real models (`TunerTest`): every way that runs
+  reads the board as the default does, and a way that is not available is
+  reported.
 
 CI runs that engine test on a real arm64 machine too (`engine-arm64`: the
 engine from the APK, 4 threads as on a phone), and
