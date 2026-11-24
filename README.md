@@ -27,13 +27,22 @@ responsible for any penalty, ban or other consequence of misusing this app.
   Runtime. The models are built into the APK, the board model quantized to
   int8 (`tools/quantize_models.py`): the same reading as the original on
   every square of 300 benchmark boards, about twice as fast, 38 MB instead
-  of 125 MB. (A build without them downloads the originals once.)
+  of 125 MB. (A build without them downloads the originals once.) The
+  locator's corners are rarely exact, and now and then they miss a file or
+  a rank of the board, so a located board is sharpened to its own edges
+  first (`BoardEdges`: on lines across each side, where the picture stops
+  being the page around the board; a side that was missed is looked for
+  further out, and one with no page beyond it, as on a phone, is taken
+  from the board's being square). On 200 boards as lichess shows them
+  (`tools/bench`), that reads 197 where the locator's own corners read
+  180; of the other three, one's orientation the model gets wrong at exact
+  corners too, and two had a tilted box from the locator.
 - **Reading speed, measured on the phone**: most of the time of a read is
   the board model's, and which way of running it is fastest differs per
   phone. The first time the overlay starts, it times a read of a board
   with one, two and four threads of ONNX Runtime's own CPU code, with the
   engine searching as it will be then, and keeps the fastest that reads
-  the board as the default does. Help and debug → Test recognition also
+  the board as the default does. The tools' Test recognition also
   tries XNNPACK and NNAPI (other code: a provider's own, a phone's
   driver), shows the table and keeps the fastest that reads it right;
   should the app then die while reading, it goes back to the default.
@@ -90,8 +99,12 @@ responsible for any penalty, ban or other consequence of misusing this app.
   moment the board is still, within a few milliseconds and before the board
   recognizer runs; the arrows come back as soon as the clean capture is
   taken, and the recognizer then checks the move on it and corrects it if
-   it was wrong (logged). When no single move explains the change, the
-   recognizer decides, as before.
+  it was wrong (logged). When no single move explains the change, the
+  recognizer decides, as before. In a fast game (four moves timed and a
+  median 1.5 s or less between them) the board is checked every 20 ms
+  instead of 30 and read once it has been still for 55 ms instead of
+  80, and the first lines are shown from depth 4, or shallower ones
+  after 40 ms.
 - **A game is remembered**: in a game the overlay follows move by move,
   the moves are kept. A king or rook that has moved cannot castle any
   more (a rook taken on its square, or one that arrives there later,
@@ -102,16 +115,20 @@ responsible for any penalty, ban or other consequence of misusing this app.
   checkmate with the king and a rook still on their squares is said on
   the card instead of leaving it on "Analysing…".
 - **Positions to take along**: a finger kept on the floating card copies
-  the position's FEN. The app's Positions card shows the last position the
+  the position's FEN. The app's position card shows the last position the
   overlay saw, its FEN and the engine's line: copy either, open the
   position in lichess's analysis, or keep it; kept positions can be
   shared as text.
 - **Steady display**: engine lines are shown as whole iterations (every
   line at one depth), from depth 8 (shallower ones after 150 ms, so an
-  engine whose depth is capped by a strength limit is shown too); below depth 18 a change of the arrows is
-  shown only when two iterations agree (an engine often switches for one
-  iteration and back); the same position's updates reach the screen about
-  twice a second; next to the depth the card says how often the position
+  engine whose depth is capped by a strength limit is shown too); a change
+  of the arrows is shown once two iterations in a row agree on it, at any
+  depth, or when it has waited 700 ms (an engine often switches for one
+  iteration and back; and its iterations grow long, so a change that stays
+  must still arrive). When the move played began one of the engine's lines
+  for the position before, the rest of that line is shown at once, dimmed,
+  until the new search's own lines come. The same position's updates reach
+  the screen about twice a second; next to the depth the card says how often the position
   came up and the number of the move (when the game was followed from its
   start), as far as the card is wide; the card keeps its size from move
   to move, showing the
@@ -125,33 +142,37 @@ responsible for any penalty, ban or other consequence of misusing this app.
   ends an analysis without a single line) is logged with everything it
   printed, restarted, and if it stays silent run with one thread, then also
   without the smothered-mate prover; the card says so. Errors are shown in
-  the overlay and written to a debug log (Help and debug → Copy the debug log).
+  the overlay and written to a debug log (the tools: Copy the debug log).
 
 ## Using it
 
 1. Install the APK (see Builds below). It targets Android API 28 on purpose
    (see Notes), so Android may warn that it was built for an older version.
-2. The app opens on a setup checklist: board recognition (built into CI
-   builds; a local build downloads it once), permission to draw over other
-   apps, and the engine. Each item that needs something has its button.
-3. Pick an engine (Change), adjust it (Options: every UCI option it has,
-   grouped into Strength, Smotherfish, Performance and Other), or add one.
-4. Tap **Start overlay** and allow screen capture, then open the app with
+2. The app has one screen, in four parts. At the top, chips for what the
+   overlay needs: **Models** (board recognition: built into CI builds; a
+   local build downloads it once), **Overlay** (permission to draw over
+   other apps) and **Engine**; tap a chip for what it needs. Under them the
+   start button, and the engine with its buttons: options, change, + to
+   add one (an arm64 UCI engine file; every UCI option it has can be
+   edited, grouped into Strength, Smotherfish, Performance and Other).
+3. The **position card** shows the last position the overlay saw, with the
+   engine's arrows: copy its FEN or its line, open it in lichess's
+   analysis, or keep it; kept positions are listed below it, to share as
+   text or to remove.
+4. The **settings** are named only; what each does is in the Help dialog
+   (the question mark at the top right), and the board above the settings
+   shows the drawing with your settings as you change them. They take
+   effect the next time the overlay starts.
+5. Tap **Start overlay** and allow screen capture, then open the app with
    the board. The floating card: ▶ analyse now · A auto mode · ⇅ side to
    move (auto / White / Black) · ◐ show/hide the arrows · ✕ close; drag it
    by any part; tap the lines to fold them; keep a finger on it to copy
    the position (its FEN) for pasting anywhere.
-5. Settings take effect the next time the overlay starts; the board preview
-   in "On the board" shows the drawing with your settings at once.
-6. If a read goes wrong: Help and debug → Copy the debug log, and Share the
+6. The **tools**: if a read goes wrong, Copy the debug log, and Share the
    last misread screen (the screen a read failed on, as the app saw it).
-   If no lines appear: Help and debug → Test the engine runs it with your
-   options for a few seconds and says what it did (and logs it). To see how
-   long a read takes on this phone: Help and debug → Test recognition.
-7. Positions: the app's Positions card has the last position the overlay
-   saw (it stays after the overlay stops): copy its FEN or the engine's
-   line, open it in lichess's analysis, or keep it. Kept positions are
-   listed below it, to share as text or to remove.
+   If no lines appear: Test the engine runs it with your options for a
+   few seconds and says what it did (and logs it). To see how long a read
+   takes on this phone: Test recognition.
 
 ## Builds
 
@@ -213,7 +234,14 @@ three positions, the way the overlay does.
   `QMODELS` the bundled int8 model reading every image as the original does;
 - the engine supervisor (a killed engine restarts and the analysis
   finishes; a position that kills it is skipped);
-- a move seen at once with the real recognizer (`FastReadTest`);
+- the board's edges on two phone screenshots (`BoardEdgesScreensTest`; in
+  core, `BoardEdgesTest` does the same on drawn boards), and a move seen
+  at once with the real recognizer (`FastReadTest`);
+- the benchmark of board reading (`BenchTest`; `BENCH` = boards as lichess
+  shows them, which the build workflow renders with `tools/bench/gen.py`):
+  how many are read right with the locator's corners, with them sharpened
+  as the app reads, with exact corners, and with corners off by up to
+  2.5 % of a side; the table is the artifact `bench-report`;
 - the tuner against the real models (`TunerTest`): every way that runs
   reads the board as the default does, and a way that is not available is
   reported.
