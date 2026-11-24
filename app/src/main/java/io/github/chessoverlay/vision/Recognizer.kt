@@ -99,9 +99,11 @@ class Recognizer(boardModel: File, locatorModel: File, val mode: RecognizerMode 
 
     /** Find the board and read it. With `knownCorners` (the board has not
      *  moved on screen) the locator is skipped: one model run instead of three. */
-    fun recognise(img: Img, legality: Boolean = true, knownCorners: List<FloatArray>? = null): Recognition {
+    fun recognise(img: Img, legality: Boolean = true, knownCorners: List<FloatArray>? = null, sharpen: Boolean = true): Recognition {
         val t0 = System.nanoTime()
-        val corners = knownCorners ?: locate(img)
+        val located = knownCorners ?: locate(img)
+        // The locator's corners are a little off; the board's own edges say where it is.
+        val corners = if (knownCorners == null && sharpen) BoardEdges.refine(img, located) else located
         val input = input(boardInput(img, corners))
         val t1 = System.nanoTime()
         val out = runBoard(env, board, input)
