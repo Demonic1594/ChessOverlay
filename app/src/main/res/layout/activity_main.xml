@@ -148,32 +148,25 @@
                             android:maxLines="1" />
                     </LinearLayout>
 
-                    <com.google.android.material.button.MaterialButton
+                    <ImageButton
                         android:id="@+id/engineChange"
-                        style="@style/Widget.Material3.Button.TextButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:minWidth="0dp"
-                        android:paddingStart="8dp"
-                        android:paddingEnd="8dp"
-                        android:text="Change"
-                        android:textAllCaps="false" />
+                        style="@style/IconButton"
+                        android:contentDescription="Change the engine"
+                        android:tooltipText="Change the engine"
+                        android:src="@drawable/ic_swap" />
 
-                    <com.google.android.material.button.MaterialButton
+                    <ImageButton
                         android:id="@+id/engineOptions"
-                        style="@style/Widget.Material3.Button.TextButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:minWidth="0dp"
-                        android:paddingStart="8dp"
-                        android:paddingEnd="8dp"
-                        android:text="Options"
-                        android:textAllCaps="false" />
+                        style="@style/IconButton"
+                        android:contentDescription="Engine options"
+                        android:tooltipText="Engine options"
+                        android:src="@drawable/ic_tune" />
 
                     <ImageButton
                         android:id="@+id/engineAdd"
                         style="@style/IconButton"
                         android:contentDescription="Add an engine file"
+                        android:tooltipText="Add an engine file"
                         android:src="@drawable/ic_add" />
                 </LinearLayout>
             </LinearLayout>
@@ -226,7 +219,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
-                            android:text="The position the overlay saw last is shown here while the overlay runs and after it stops." />
+                            android:text="The overlay's last position appears here." />
 
                         <TextView
                             android:id="@+id/positionFen"

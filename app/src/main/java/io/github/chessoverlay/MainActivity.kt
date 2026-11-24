@@ -115,7 +115,7 @@ class MainActivity : AppCompatActivity() {
         val checks = Rows(findViewById(R.id.checks))
         checks.clear()
         checks.statusChips(listOf(
-            Rows.Status(if (downloading) "Recognition…" else "Recognition", models.isBundled || models.ready, busy = downloading) {
+            Rows.Status(if (downloading) "Models…" else "Models", models.isBundled || models.ready, busy = downloading) {
                 if (!models.ready) downloadModels() else toast("The recognition models are here")
             },
             Rows.Status("Overlay", Settings.canDrawOverlays(this)) { askOverlayPermission() },
@@ -173,7 +173,7 @@ class MainActivity : AppCompatActivity() {
                 p.whiteCp?.let { c -> if (p.whiteToMove) c else -c }, p.whiteMate?.let { m -> if (p.whiteToMove) m else -m }, it) })
         } else {
             title.text = "No position yet"
-            detail.text = "The position the overlay sees appears here while it runs, and stays after it stops."
+            detail.text = "The overlay's last position appears here."
             preview.shown = null
         }
         // The positions kept: one row each, and what to do with all of them.
@@ -287,7 +287,8 @@ class MainActivity : AppCompatActivity() {
                 "Start overlay, allow the screen capture, then open the app with the board: the board is read, " +
                     "and the engine's moves are drawn over it. Android asks to allow the capture each time.",
                 "The chips above the button are what the overlay needs: the recognition models, permission to draw " +
-                    "over other apps, and an engine. An amber one is tapped to set it right.",
+                    "over other apps, and an engine. An amber one is tapped to set it right. Next to the engine, the arrows " +
+                    "change it, the sliders open its options, and + adds an engine file.",
                 "THE FLOATING CARD",
                 "▶ read the screen now · A auto mode (follows the game) · ⇅ side to move (worked out, White, Black) · " +
                     "◐ show or hide the arrows · ✕ close. Drag it by any part; tap its lines to fold them; " +
