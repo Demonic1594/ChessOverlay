@@ -234,6 +234,16 @@ The APK is written to `app/build/outputs/apk/release/app-release.apk`. Such a bu
 
 CI runs the Gradle tasks on every change, plus the benchmark and the engine on real arm64 hardware. Details, the list of artifacts, the benchmark and how another engine is bundled: [docs/development.md](docs/development.md).
 
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [User guide](docs/usage.md) | Every part of the app: the floating card and what it can say, the settings, engines, positions, the tools, privacy |
+| [How it works](docs/how-it-works.md) | From the screen to the arrows: recognition, game tracking, auto mode, analysis, drawing |
+| [Development guide](docs/development.md) | Building, signing, the tests and what each needs, CI and its artifacts, the benchmark |
+| [Contributing](CONTRIBUTING.md) | How to report a problem, and what a pull request should contain |
+| [Third-party notices](THIRD_PARTY_NOTICES.md) | The licences of what the APK contains |
+
 ## Known limitations
 
 - **Not on Google Play.** The app targets API 28 on purpose: from API 29 on, Android does not let an app execute files it wrote itself, which loading your own engines depends on (DroidFish does the same). It can be sideloaded only.
