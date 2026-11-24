@@ -130,7 +130,8 @@ class MainActivity : AppCompatActivity() {
             ContextCompat.getColor(this, if (running) R.color.bad else R.color.accent))
         startHint.text = if (running) "Open the app with the board." else "Android asks to allow screen capture each time."
         val e = engines.firstOrNull { it.id == prefs.engineId } ?: engines.firstOrNull()
-        findViewById<TextView>(R.id.engineName).text = e?.title ?: "No engine"
+        // "(built in)" says the line under it.
+        findViewById<TextView>(R.id.engineName).text = e?.title?.replace(" (built in)", "") ?: "No engine"
         findViewById<TextView>(R.id.engineKind).text = when (e?.kind) {
             EngineInfo.Kind.BUNDLED -> "Built in"
             EngineInfo.Kind.OPEN_EXCHANGE -> "From an engine app"
