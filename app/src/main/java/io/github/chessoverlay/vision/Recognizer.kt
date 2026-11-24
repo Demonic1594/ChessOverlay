@@ -101,29 +101,17 @@ class Recognizer(boardModel: File, locatorModel: File, val mode: RecognizerMode 
      * Find the board and read it. With `knownCorners` (the board has not
      * moved on screen) the locator is skipped: one model run instead of
      * three. A located board is sharpened to its own edges when `sharpen`
-     * (see BoardEdges); and when the sharpened corners do not make a reading
-     * at least [SURE], the board is read at the locator's corners too, and
-     * the surer reading is the one returned (`pick`).
+     * (see BoardEdges).
      */
-    fun recognise(img: Img, legality: Boolean = true, knownCorners: List<FloatArray>? = null, sharpen: Boolean = true,
-                  pick: Boolean = true): Recognition {
-        if (knownCorners != null || !sharpen) return read(img, knownCorners ?: locate(img), legality)
+    fun recognise(img: Img, legality: Boolean = true, knownCorners: List<FloatArray>? = null, sharpen: Boolean = true): Recognition {
+        if (knownCorners != null) return read(img, knownCorners, legality)
         val t0 = System.nanoTime()
         val located = locate(img)
         val find = (System.nanoTime() - t0) / 1_000_000
         // The locator's corners are a little off; the board's own edges say where it is.
-        val sharpened = BoardEdges.refine(img, located)
-        val first = read(img, sharpened, legality)
-        var timing = "find ${find} ms, $lastTiming"
-        if (!pick || sharpened === located || first.confidence >= SURE) {
-            lastTiming = timing
-            return first
-        }
-        // The sharpened corners did not make a sure reading: the locator's may be the better ones.
-        val second = read(img, located, legality)
-        timing += ", again at the locator's: $lastTiming"
-        lastTiming = timing
-        return if (second.confidence > first.confidence) second else first
+        val r = read(img, if (sharpen) BoardEdges.refine(img, located) else located, legality)
+        lastTiming = "find ${find} ms, $lastTiming"
+        return r
     }
 
     /** The board at `corners` read: its image prepared, the model run, the reading taken from the model's output. */
@@ -290,8 +278,5 @@ class Recognizer(boardModel: File, locatorModel: File, val mode: RecognizerMode 
         }
 
         private fun ms(from: Long, to: Long) = (to - from) / 1_000_000
-
-        /** A reading at least this sure needs no second one at the locator's corners. */
-        const val SURE = 0.5f
     }
 }

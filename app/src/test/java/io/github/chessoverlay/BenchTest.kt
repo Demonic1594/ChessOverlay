@@ -60,8 +60,7 @@ class BenchTest {
         val images = list.associate { it.file to load(File(dir, it.file)) }
         val report = StringBuilder("Board reading on ${list.size} boards as lichess shows them (x86 runner).\n")
 
-        fun measure(label: String, modelDir: String, jitter: Double, locate: Boolean, sharpen: Boolean = true,
-                   pick: Boolean = true): Tally {
+        fun measure(label: String, modelDir: String, jitter: Double, locate: Boolean, sharpen: Boolean = true): Tally {
             val t = Tally()
             val times = ArrayList<Long>()
             val bad = ArrayList<String>()
@@ -73,7 +72,7 @@ class BenchTest {
                     val a = jitter * b.side
                     val corners = if (locate) null else b.corners().map { floatArrayOf(it[0] + ((rng.nextDouble() * 2 - 1) * a).toFloat(), it[1] + ((rng.nextDouble() * 2 - 1) * a).toFloat()) }
                     val t0 = System.nanoTime()
-                    val r = rec.recognise(img, knownCorners = corners, sharpen = sharpen, pick = pick)
+                    val r = rec.recognise(img, knownCorners = corners, sharpen = sharpen)
                     times += System.nanoTime() - t0
                     val off = r.corners.mapIndexed { i, c -> max(abs(c[0] - b.corners()[i][0]), abs(c[1] - b.corners()[i][1])) }.max()
                     if (locate) offs += off
@@ -81,7 +80,7 @@ class BenchTest {
                     t.add(listOf("all", "pieces ${b.pieces}", "theme ${b.theme}", if (b.black) "black at the bottom" else "white at the bottom",
                         if (b.coords) "with coordinates" else "without coordinates", if (b.phone) "phone screen" else "board alone",
                         "side ${if (b.side < 400) "<400" else if (b.side < 700) "400-699" else ">=700"}"), ok)
-                    if (!ok && bad.size < 12) bad += "${b.file}: ${b.theme}/${b.pieces}${if (b.black) " black" else ""}: " +
+                    if (!ok && bad.size < 40) bad += "${b.file}: ${b.theme}/${b.pieces}${if (b.black) " black" else ""}: " +
                         "sure ${String.format(java.util.Locale.US, "%.2f", r.confidence)}; got ${r.placement}" + (if (r.blackAtBottom != b.black) " (orientation wrong)" else "") +
                         "; corners " + r.corners.joinToString(" ") { "(${it[0].toInt()},${it[1].toInt()})" } + ", the board's ${b.box.joinToString(prefix = "(", postfix = ")")}"
                     if (locate) {
@@ -103,8 +102,7 @@ class BenchTest {
         }
 
         measure("int8 model, the board located as the locator gives it", qmodels, 0.0, locate = true, sharpen = false)
-        measure("int8 model, the board located and sharpened", qmodels, 0.0, locate = true, pick = false)
-        val shipped = measure("int8 model, located, sharpened, and the surer of the two readings kept (as the first read does)", qmodels, 0.0, locate = true)
+        val shipped = measure("int8 model, the board located and sharpened (as the app reads it)", qmodels, 0.0, locate = true)
         measure("int8 model, corners exact", qmodels, 0.0, locate = false)
         measure("int8 model, corners off by up to 1 % of a side", qmodels, 0.01, locate = false)
         measure("int8 model, corners off by up to 2.5 % of a side", qmodels, 0.025, locate = false)
