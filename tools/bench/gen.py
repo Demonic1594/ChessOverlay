@@ -114,8 +114,8 @@ def page(b: Board, theme, piece_files, background):
            f'#board{{position:absolute;left:{x0}px;top:{y0}px;width:{side}px;height:{side}px;'
            f'background:url("{image.as_uri()}");background-size:100% 100%}}'
            f'#board img{{position:absolute;width:{sq:.3f}px;height:{sq:.3f}px}}'
-           f'.c{{position:absolute;font-weight:bold;font-size:{font}px;line-height:1}}',
-           f'<div id="board">']
+           f'.c{{position:absolute;font-weight:bold;font-size:{font}px;line-height:1}}</style>',
+           '<div id="board">']
     for square, piece in board.piece_map().items():
         file, rank = chess.square_file(square), chess.square_rank(square)
         col, row = (7 - file, rank) if black else (file, 7 - rank)
@@ -144,7 +144,6 @@ def page(b: Board, theme, piece_files, background):
                    f'<div style="{under};{icon}"></div><div style="{under};margin-left:56px;margin-top:4px;font-size:17px;font-weight:bold">'
                    f'{"Kasparov_62" if black else "Adjudicate"}</div><div style="{under};margin-left:56px;margin-top:28px;font-size:13px">1482</div>'
                    f'<div style="{clock};top:{bottom + 10}px">0:12</div></div>')
-    out.append("</style>")
     return "".join(out)
 
 

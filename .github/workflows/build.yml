@@ -159,6 +159,19 @@ jobs:
           path: core/build/preview/
           retention-days: 14
 
+      # A few of the benchmark's pictures, to see that they show what they should.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-samples
+          path: |
+            build/bench/b000.png
+            build/bench/b005.png
+            build/bench/b020.png
+            build/bench/b077.png
+          retention-days: 7
+        if-no-files-found: ignore
+
       # What the benchmark of board reading said (BenchTest's table).
       - uses: actions/upload-artifact@v4
         if: always()
