@@ -21,8 +21,16 @@ import kotlin.math.max
  *   colour that left squares, then to the side at the bottom. Two moves at
  *   once (a quick reply) are found too and keep the side to move.
  * - What only the moves show goes with them: a linked position is the last
- *   one after its move, so it keeps the castling rights and the en passant
- *   square (see Board); a jump, or a step back, is read from its pieces.
+ *   one after its move, so it keeps the castling rights, the en passant
+ *   square and the move count (see Board).
+ * - The game's memory: the positions of the line followed so far are kept
+ *   ([history]). A reading that no move explains but that is one of them (a
+ *   step back in the move list, an undo, a jump to an earlier move) is taken
+ *   as it was then, side to move and all. From that come the number of the
+ *   move ([moveNumber], when the game was followed from its start) and how
+ *   often the position came up ([repetitions]). A position never seen
+ *   before is read from its pieces: castling is then taken to be possible
+ *   while king and rook stand on their squares.
  * - Moves seen at once ([explainChange]): which squares changed, and the
  *   legal moves, usually leave exactly one move (or a move and its reply)
  *   that explains them. That is known within a millisecond of the board
@@ -43,6 +51,24 @@ class BoardTracker {
     /** The last move linked (UCI): sites highlight its squares. */
     var lastMove: String? = null
         private set
+
+    /** A position the game went through, as it was taken then. */
+    private class Seen(val board: Board, val placement: String, val whiteToMove: Boolean, val lastMove: String?,
+                       val sideKnown: Boolean, val ply: Int?)
+
+    /** The positions of the line followed so far, before the current one, oldest first. */
+    private val history = ArrayList<Seen>()
+    /** Whether [whiteToMove] is known (a move showed it, the user set it, a check forced it), not guessed from the picture. */
+    private var sideKnown = false
+
+    /** Moves played in the game when it was followed from its start position; else null. */
+    var ply: Int? = null
+        private set
+    /** The number of the move to be played (1 at the start), when [ply] is known; else null. */
+    val moveNumber: Int? get() = ply?.let { it / 2 + 1 }
+    /** How many times the current position came up in the game, itself included. */
+    var repetitions = 1
+        private set
     // Sample points (screen pixels) for the current corners, and their
     // colours in the last clean read: 64 squares x PER points, row-major from
     // the top-left square as drawn.
@@ -58,13 +84,14 @@ class BoardTracker {
     sealed class Result {
         /** Nothing on the board changed. */
         object Same : Result()
-        /** A new position: `move` was played (by `mover`) when it is known. */
+        /** A new position: `move` was played when it is known; `back`: it is one the game was in before. */
         data class Position(
             val board: Board,
             val whiteToMove: Boolean,
             val move: String?,
             val previous: Board?,
             val previousWhiteToMove: Boolean,
+            val back: Boolean = false,
         ) : Result()
         /** Recognised, but not a position an engine can take. */
         data class Invalid(val reason: String) : Result()
@@ -77,7 +104,10 @@ class BoardTracker {
      */
     fun reset(keepGame: Boolean = false) {
         corners = null; xs = null; ys = null; ref = null; pendingFast = null
-        if (!keepGame) { board = null; lastMove = null }
+        if (!keepGame) {
+            board = null; lastMove = null
+            history.clear(); sideKnown = false; ply = null; repetitions = 1
+        }
     }
 
     // ---- moves seen at once -------------------------------------------------
@@ -250,47 +280,63 @@ class BoardTracker {
         } catch (e: IllegalArgumentException) {
             return Result.Invalid(e.message ?: "bad board")
         }
-        // How the game got here: one move, or a move each (a quick reply).
-        val moves: List<String>? = decoded?.moves ?: prev?.let { p ->
-            Board.findMove(p, read)?.let { listOf(it) } ?: Board.findTwoMoves(p, read, prevWhite)?.toList()
-        }
-        // A move is played by the side to move. One that seems to be played by
-        // the other side is a piece going back where it came from: a step back
-        // in the move list, or an undo. The position before it is not "the last
-        // one after a move", so only its pieces are known, as after a jump.
-        val forward = moves.isNullOrEmpty() || prev == null ||
-            prev[Board.squareOf(moves[0].substring(0, 2))].isUpperCase() == prevWhite
-        // With a move, the new position is the old one after it: that keeps
-        // what a picture cannot show (the castling rights, the en passant
-        // square).
-        val b = if (moves != null && moves.isNotEmpty()) {
-            if (forward && prev != null) prev.copy().also { x -> moves.forEach { x.play(it) } }
-            else Board.fromPlacement(read.placement())
-        } else read
-        val sameBoard = prev != null && prev.placement() == b.placement()
+        // The same pieces as before: the same position (perhaps turned round), the same game.
+        val sameBoard = prev != null && read.placement() == prev.placement()
         if (sameBoard && sideOverride == null) {
-            // The same position (perhaps turned round): the same game.
             corners = rec.corners
             blackAtBottom = black
             remember(img, rec.corners)
             return Result.Same
         }
 
-        if (prev != null && moves == null && strict && sideOverride == null) {
-            val diff = (0..63).count { prev[it] != b[it] }
+        // How the game got here: one move, or a move each (a quick reply).
+        val moves: List<String>? = decoded?.moves ?: prev?.let { p ->
+            Board.findMove(p, read)?.let { listOf(it) } ?: Board.findTwoMoves(p, read, prevWhite)?.toList()
+        }
+        // A move is played by the side to move. When that side is known and a
+        // piece of the other side seems to move, it is going back where it came
+        // from: a step back in the move list, or an undo. When the side to move
+        // was only guessed, such a move is a move the guess got wrong, and it
+        // sets the side right.
+        val moverWhite = moves?.firstOrNull()?.let { prev?.get(Board.squareOf(it.substring(0, 2)))?.isUpperCase() }
+        val played = moves != null && moves.isNotEmpty() && (moverWhite == prevWhite || !sideKnown)
+        val playedMoves = if (played) moves else null
+        // No move of the game explains the reading. It may be a position the
+        // game went through before (a step back of one or more moves, a jump
+        // to an earlier move): then it is taken as it was then, with what a
+        // picture cannot show (the side to move, the castling rights).
+        val at = if (played || sameBoard) -1 else history.indexOfLast { it.placement == read.placement() }
+        val seen = if (at >= 0) history[at] else null
+        val b = if (playedMoves != null && prev != null) {
+            // The new position is the old one after its move: that keeps the
+            // castling rights, the en passant square and the move count.
+            prev.copy().also { x -> playedMoves.forEach { x.play(it) } }
+        } else when {
+            seen != null -> seen.board
+            // A piece that went back where it came from, in a position the game
+            // never went through: known from its pieces only, as after a jump.
+            moves != null && moves.isNotEmpty() -> Board.fromPlacement(read.placement())
+            else -> read
+        }
+        val diff = if (prev == null) 64 else (0..63).count { prev[it] != b[it] }
+        if (prev != null && playedMoves == null && strict && sideOverride == null) {
             if (diff <= SMALL_CHANGE && suspect != b.placement()) {
                 suspect = b.placement()
                 return Result.Invalid("no move explains it; reading again")
             }
         }
         suspect = null
-        val move = moves?.singleOrNull()
-        val prefer: Boolean = sideOverride ?: when {
+        val move = playedMoves?.singleOrNull()
+        // A piece that went back where it came from (not a move of the side to move).
+        val backMove = if (moves != null && playedMoves == null) moverWhite else null
+        val prefer: Boolean = sideOverride ?: seen?.takeIf { it.sideKnown }?.whiteToMove ?: when {
             move != null -> !b[Board.squareOf(move.substring(2, 4))].isUpperCase()
-            moves != null && moves.size == 2 -> prevWhite
+            playedMoves != null -> prevWhite   // a move and the reply that came with it
             b.placement() == START -> true   // a new game: White begins, whichever side is at the bottom
+            // In a game whose side to move is known, that side is to move again.
+            backMove != null && sideKnown -> backMove == true
             // A small change is the rest of a move or two; a big one is another game.
-            prev != null && (0..63).count { prev[it] != b[it] } <= 8 -> Board.mover(prev, b)?.let { !it } ?: !black
+            prev != null && diff <= 8 -> Board.mover(prev, b)?.let { !it } ?: !black
             else -> !black
         }
         // A position no game can reach is a misread (a piece caught mid-move):
@@ -302,10 +348,39 @@ class BoardTracker {
         blackAtBottom = black
         remember(img, rec.corners)
         if (sameBoard && white == prevWhite) return Result.Same
+
+        // The game's memory: where it went, for a step back and for repetitions.
+        val oldPly = ply
+        val oldKnown = sideKnown
+        // The side to move is known when the user or a move gave it, when this
+        // is the start position, when a check forced it (the side preferred was
+        // impossible), or when a piece going back showed it.
+        val known = sideOverride != null || playedMoves != null || b.placement() == START ||
+            b.problem(prefer) != null || (backMove != null && oldKnown)
+        if (sameBoard) {
+            sideKnown = known
+            repetitions = 1 + history.count { it.board.samePosition(b, white) }
+        } else {
+            if (seen != null) {
+                history.subList(at, history.size).clear()   // the line goes on from here
+            } else if (b.placement() == START && playedMoves == null) {
+                history.clear()   // another game, or the game seen from its start
+            } else if (prev != null) {
+                history.add(Seen(prev, prev.placement(), prevWhite, lastMove, oldKnown, oldPly))
+                while (history.size > MAX_HISTORY) history.removeAt(0)
+            }
+            when {
+                seen != null -> { ply = seen.ply; sideKnown = known || seen.sideKnown }
+                playedMoves != null -> { ply = oldPly?.plus(playedMoves.size); sideKnown = true }
+                b.placement() == START -> { ply = 0; sideKnown = true }
+                else -> { ply = null; sideKnown = known }
+            }
+            repetitions = 1 + history.count { it.board.samePosition(b, white) }
+        }
         board = b
         whiteToMove = white
-        lastMove = moves?.lastOrNull()
-        return Result.Position(b, white, move, prev, prevWhite)
+        lastMove = playedMoves?.lastOrNull() ?: seen?.lastMove
+        return Result.Position(b, white, move, prev, prevWhite, back = seen != null)
     }
 
     /** `changed` squares look different; `blind` ones had too few uncovered points to tell. */
@@ -316,6 +391,9 @@ class BoardTracker {
 
         /** Changed squares up to which an unexplained change is suspected to be a misread. */
         private const val SMALL_CHANGE = 4
+
+        /** Positions kept of the line followed (a game has a few hundred at most). */
+        private const val MAX_HISTORY = 1024
 
         /** Points per square side: 7 x 7 over the inner 70% of each square. */
         private const val SAMPLES = 7

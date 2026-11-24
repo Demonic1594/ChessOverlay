@@ -6,11 +6,12 @@ package io.github.chessoverlay.chess
  * 0..63 with a1 = 0, h1 = 7, a8 = 56. Pieces are FEN letters, '.' = empty.
  *
  * A board also keeps what the game left behind and no single picture shows:
- * the castling rights and the en passant square. [play] keeps both up to
- * date, so a game followed move by move remembers that the king or a rook
- * has moved. A board made from a placement alone ([fromPlacement]) has no
- * history: castling is taken to be possible while king and rook stand on
- * their squares, and so is a capture en passant past an enemy pawn.
+ * the castling rights, the en passant square and the count of moves since
+ * the last capture or pawn move. [play] keeps them up to date, so a game
+ * followed move by move remembers that the king or a rook has moved. A
+ * board made from a placement alone ([fromPlacement]) has no history:
+ * castling is taken to be possible while king and rook stand on their
+ * squares, and so is a capture en passant past an enemy pawn.
  */
 class Board private constructor(
     private val sq: CharArray,
@@ -20,9 +21,11 @@ class Board private constructor(
     private var ep: Int,
     /** Whether [ep] is known: false for a board read from the screen alone. */
     private var epKnown: Boolean,
+    /** Moves played since the last capture or pawn move, as far as the game is known. */
+    private var halfmoves: Int,
 ) {
 
-    fun copy() = Board(sq.copyOf(), rights, ep, epKnown)
+    fun copy() = Board(sq.copyOf(), rights, ep, epKnown, halfmoves)
 
     operator fun get(square: Int): Char = sq[square]
 
@@ -125,7 +128,16 @@ class Board private constructor(
     }
 
     fun fen(whiteToMove: Boolean): String =
-        "${placement()} ${if (whiteToMove) "w" else "b"} ${castling()} ${enPassantField(whiteToMove)} 0 1"
+        "${placement()} ${if (whiteToMove) "w" else "b"} ${castling()} ${enPassantField(whiteToMove)} $halfmoves 1"
+
+    /**
+     * Whether this is the same position as `other` with the same side to
+     * move, as for a repetition: the same pieces on the same squares, the
+     * same castling rights and the same en passant capture.
+     */
+    fun samePosition(other: Board, whiteToMove: Boolean): Boolean =
+        placement() == other.placement() && castling() == other.castling() &&
+            enPassantField(whiteToMove) == other.enPassantField(whiteToMove)
 
     /**
      * The FEN's en passant field: the square when the side to move has a pawn
@@ -144,17 +156,22 @@ class Board private constructor(
     }
 
     /**
-     * Play a UCI move (e2e4, e7e8q, e1g1) without legality checks. The
-     * castling rights and the en passant square go with it: a king that
-     * moves loses both its rights, a rook that leaves its square, or is
-     * taken on it, loses that side's, and only a pawn advancing two squares
-     * leaves an en passant square behind.
+     * Play a UCI move (e2e4, e7e8q, e1g1) without legality checks, except
+     * that `uci` must be a move of that form (see [isMove]); anything else,
+     * as a broken engine line, throws IllegalArgumentException. The
+     * castling rights, the en passant square and the move count go with
+     * it: a king that moves loses both its rights, a rook that leaves its
+     * square, or is taken on it, loses that side's, only a pawn advancing
+     * two squares leaves an en passant square behind, and a capture or a
+     * pawn move starts the count again.
      */
     fun play(uci: String) {
+        require(isMove(uci)) { "not a UCI move: \"$uci\"" }
         val from = squareOf(uci.substring(0, 2))
         val to = squareOf(uci.substring(2, 4))
         val piece = sq[from]
         val white = piece.isUpperCase()
+        val captured = sq[to] != '.'
         // Castling: the king moves two files; bring the rook across.
         if (piece.lowercaseChar() == 'k' && kotlin.math.abs(to - from) == 2) {
             val (rf, rt) = if (to > from) from + 3 to from + 1 else from - 4 to from - 1
@@ -172,6 +189,7 @@ class Board private constructor(
         rights = rights and rightOf(from).inv() and rightOf(to).inv()
         ep = if (piece == 'P' && to - from == 16 || piece == 'p' && from - to == 16) (from + to) / 2 else NO_EP
         epKnown = true
+        halfmoves = if (piece.lowercaseChar() == 'p' || captured) 0 else halfmoves + 1
     }
 
     /** Short algebraic notation for a UCI move in this position: piece
@@ -179,7 +197,7 @@ class Board private constructor(
      *  x for captures, destination, =Q for promotions, O-O for castling, +
      *  for check. Mate is not detected here (that needs every reply). */
     fun moveText(uci: String): String {
-        if (uci.length < 4) return uci
+        if (!isMove(uci)) return uci
         val from = squareOf(uci.substring(0, 2))
         val to = squareOf(uci.substring(2, 4))
         if (from !in 0..63 || to !in 0..63) return uci
@@ -317,13 +335,14 @@ class Board private constructor(
         return true
     }
 
-    /** Text for a whole line, e.g. "1. e4 e5 2. Nf3" (or "1... e5 2. Nf3"). */
+    /** Text for a whole line, e.g. "1. e4 e5 2. Nf3" (or "1... e5 2. Nf3"). A move that is not one ends the line. */
     fun lineText(pv: List<String>, whiteToMove: Boolean, maxMoves: Int = 8): String {
         val b = copy()
         val sb = StringBuilder()
         var white = whiteToMove
         var n = 1
         for ((i, m) in pv.take(maxMoves).withIndex()) {
+            if (!isMove(m)) break
             if (white) sb.append("$n. ") else if (i == 0) sb.append("$n... ")
             sb.append(b.moveText(m)).append(' ')
             b.play(m)
@@ -352,6 +371,10 @@ class Board private constructor(
             return if (f in 0..7 && r in 0..7) r * 8 + f else -1
         }
 
+        /** Whether `uci` has the form of a UCI move: two squares, and for a promotion a piece (q, r, b or n). */
+        fun isMove(uci: String): Boolean = uci.length in 4..5 && squareOf(uci.substring(0, 2)) >= 0 &&
+            squareOf(uci.substring(2, 4)) >= 0 && (uci.length == 4 || uci[4] in "qrbnQrbn")
+
         /** The castling right of the rook that starts on `square` (0 for any other square). */
         private fun rightOf(square: Int) = when (square) {
             0 -> WHITE_OOO
@@ -361,12 +384,10 @@ class Board private constructor(
             else -> 0
         }
 
-        /**
-         * From the first FEN field. Throws IllegalArgumentException if
+        /** From the first FEN field. Throws IllegalArgumentException if
          * malformed. The position has no history: castling is taken to be
          * possible while king and rook stand on their original squares, and
-         * whether a pawn has just advanced two squares is not known.
-         */
+         * whether a pawn has just advanced two squares is not known. */
         fun fromPlacement(placement: String): Board {
             val rows = placement.trim().split(' ')[0].split('/')
             require(rows.size == 8) { "placement needs 8 ranks" }
@@ -389,7 +410,7 @@ class Board private constructor(
             var rights = 0
             if (sq[4] == 'K') { if (sq[7] == 'R') rights = rights or WHITE_OO; if (sq[0] == 'R') rights = rights or WHITE_OOO }
             if (sq[60] == 'k') { if (sq[63] == 'r') rights = rights or BLACK_OO; if (sq[56] == 'r') rights = rights or BLACK_OOO }
-            return Board(sq, rights, NO_EP, epKnown = false)
+            return Board(sq, rights, NO_EP, epKnown = false, halfmoves = 0)
         }
 
         /**

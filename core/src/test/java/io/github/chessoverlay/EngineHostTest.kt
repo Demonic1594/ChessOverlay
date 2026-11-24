@@ -140,6 +140,7 @@ class EngineHostTest {
             host.analyse("8/8/6R1/3P4/1kP1N3/pP5P/P2B2P1/5K2 b - - 0 1", 3, 0)
             Thread.sleep(1500)
             assertTrue("finished", updates.any { it.finished })
+            assertTrue("and the overlay is told that there is no move", updates.any { it.noLegalMove && it.lines.isEmpty() })
             assertTrue("no restart: fallback ${host.fallback}, status $status", host.fallback == 0 && status.isEmpty())
         }
         dir.deleteRecursively()

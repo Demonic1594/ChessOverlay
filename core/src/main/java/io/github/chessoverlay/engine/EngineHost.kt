@@ -6,8 +6,18 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
-/** One analysis result for the request with this `id`. */
-data class AnalysisUpdate(val id: Long, val fen: String, val lines: List<PvLine>, val finished: Boolean)
+/**
+ * One analysis result for the request with this `id`. `noLegalMove`: the
+ * engine ended the search with "bestmove (none)": the position has no legal
+ * move (checkmate or stalemate), which the overlay then says.
+ */
+data class AnalysisUpdate(
+    val id: Long,
+    val fen: String,
+    val lines: List<PvLine>,
+    val finished: Boolean,
+    val noLegalMove: Boolean = false,
+)
 
 /**
  * Keeps one engine running and analyses on request. All engine calls happen
@@ -141,8 +151,11 @@ class EngineHost(
         if (r.movetimeMs > 0 && e.pvSinceGo > 0) return
         val bm = e.bestMoveLine?.split(" ")?.getOrNull(1)
         if (bm == "(none)" || bm == "0000") {
-            // Checkmate or stalemate: there is no line to give.
-            DebugLog.i(TAG, "${e.name}: no legal move in ${r.fen} (${e.bestMoveLine})")
+            // Checkmate or stalemate: there is no line to give. The overlay is
+            // told, so it does not wait for lines (its own rule check may have
+            // allowed a move that a picture cannot show to be impossible).
+            DebugLog.i(TAG, "${e.name}: no legal move in $r.fen (${e.bestMoveLine})")
+            if (r.id == ids.get()) onUpdate(AnalysisUpdate(r.id, r.fen, emptyList(), finished = true, noLegalMove = true))
             return
         }
         silent(r, e, "ended the search without a line (${e.bestMoveLine})")

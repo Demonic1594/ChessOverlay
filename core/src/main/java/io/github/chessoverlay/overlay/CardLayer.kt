@@ -30,7 +30,7 @@ class CardLayout(val shapes: List<Shape>, val height: Float, val hits: List<Card
 /**
  * The floating card, in its own coordinates (0, 0 = its top-left):
  *
- *     ⠿  ▶  A  ⇅  ◐  ✕              ○ d24  [+1.2]
+ *     ⠿  ▶  A  ⇅  ◐  ✕        ○ d24 ×2 14. [+1.2]
  *     ▕██████████████░░░░░░░░░░░░░░░░▏
  *     ▍+1.2  Bb5 a6 Ba4 Nf6 O-O Be7 Re1 …
  *     ▍+0.9  d4 exd4 Nxd4 Nf6 Nxc6 …
@@ -41,7 +41,9 @@ class CardLayout(val shapes: List<Shape>, val height: Float, val hits: List<Card
  * its size from move to move.
  *
  * The pill is the score from White's view; the bar fills from the side of
- * the player at the bottom of the board; the dot is the side to move. Each
+ * the player at the bottom of the board; the dot is the side to move; next
+ * to it the depth, and when the card is wide enough how often the position
+ * came up and the number of the move. Each
  * engine line is one row: its chip matches its arrow, the first move is
  * bold, the side to move's later moves are bright and the opponent's
  * dimmed, so a line reads at a glance without move numbers (which a
@@ -77,11 +79,19 @@ object CardLayer {
         // Row 1: grip and buttons on the left, depth and score on the right.
         val rowH = 38 * d
         val mid = rowH / 2
-        var x = 4 * d
+        val x0 = 4 * d
         val gripW = 24 * d
-        body += centred(x + gripW / 2, mid, "⠿", 16 * d, DIM, false, m)
-        x += gripW
+        var x = x0 + gripW
         var right = width - pad
+        val buttons = listOf(
+            CardButton.READ to "▶",
+            CardButton.AUTO to "A",
+            CardButton.SIDE to when (ui.side) { null -> "⇅"; true -> "W"; false -> "B" },
+            CardButton.SHOW to "◐",
+            CardButton.CLOSE to "✕",
+        )
+        // The width the buttons keep when the card is narrow.
+        val minButton = 28 * d
         if (top != null) {
             val score = shortScore(top, shownState.whiteToMove)
             val white = top.whiteScore(shownState.whiteToMove) >= 0
@@ -94,22 +104,30 @@ object CardLayer {
             body += centred(right - pw / 2, mid, score, ts, c(if (white) 0xFF111111.toInt() else WHITE), true, m)
             right -= pw + 8 * d
             val ds = 12 * d
-            val depth = "d${top.depth}"
-            val dw = m.width(depth, ds, false)
-            body += Shape.Text(right, mid + ds * 0.36f, depth, ds, c(DIM), false, Align.RIGHT, dw)
-            right -= dw + 9 * d
+            // What is known of the game: the depth, then how often the position
+            // came up and the move's number, as far as the card is wide.
+            var parts = listOf("d${top.depth}") + listOfNotNull(
+                if (s.repetitions > 1) "×${s.repetitions}" else null, s.moveNumber?.let { "$it." })
+            val space = m.width(" ", ds, false)
+            val free = right - x - buttons.size * minButton - 18 * d
+            while (parts.size > 1 &&
+                parts.fold(0f) { w, p -> w + m.width(p, ds, false) } + space * (parts.size - 1) > free) parts = parts.dropLast(1)
+            val info = parts.joinToString(" ")
+            val iw = m.width(info, ds, false)
+            body += Shape.Text(right, mid + ds * 0.36f, info, ds, c(DIM), false, Align.RIGHT, iw)
+            right -= iw + 9 * d
             body += Shape.Circle(right, mid, 5 * d, c(if (s.whiteToMove) WHITE else 0xFF0E0E0E.toInt()),
                 if (s.whiteToMove) 0 else 0xFFA0A0A0.toInt(), 1.2f * d)
             right -= 9 * d
         }
-        val buttons = listOf(
-            CardButton.READ to "▶",
-            CardButton.AUTO to "A",
-            CardButton.SIDE to when (ui.side) { null -> "⇅"; true -> "W"; false -> "B" },
-            CardButton.SHOW to "◐",
-            CardButton.CLOSE to "✕",
-        )
-        val bw = min(38 * d, max(28 * d, (right - x) / buttons.size))
+        // A card too narrow for the buttons beside the grip does without the
+        // grip: the card is dragged by any part of it.
+        if ((right - x) / buttons.size < minButton) {
+            x = x0
+        } else {
+            body += centred(x0 + gripW / 2, mid, "⠿", 16 * d, DIM, false, m)
+        }
+        val bw = min(38 * d, max(minButton, (right - x) / buttons.size))
         for ((b, label) in buttons) {
             val color = when {
                 b == CardButton.AUTO && ui.auto -> ON
@@ -205,12 +223,12 @@ object CardLayer {
         }
     }
 
-    /** The line in short algebraic notation, with + for checks and # for the mate that ends a mating line. */
+    /** The line in short algebraic notation, with + for checks and # for the mate that ends a mating line. A move that is not one ends the line. */
     fun san(board: Board, line: PvLine): List<String> {
         val b = board.copy()
         val out = ArrayList<String>()
         for (mv in line.pv.take(16)) {
-            if (mv.length < 4) break
+            if (!Board.isMove(mv)) break
             out += b.moveText(mv)
             b.play(mv)
         }

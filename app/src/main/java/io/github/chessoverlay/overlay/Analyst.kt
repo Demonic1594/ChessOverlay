@@ -79,6 +79,18 @@ class Analyst(
 
     private fun show(u: AnalysisUpdate) {
         val s = state
+        if (u.noLegalMove) {
+            // The engine has no move to search for: checkmate or stalemate. The
+            // rules here did not see it (a capture en passant or a castling a
+            // picture cannot rule out was allowed for); say it, so the card
+            // does not stay on "Analysing…".
+            val over = s.board?.let {
+                if (it.inCheck(s.whiteToMove)) "Checkmate: ${if (s.whiteToMove) "Black" else "White"} wins" else "Stalemate: a draw"
+            } ?: "No legal move: checkmate or stalemate"
+            DebugLog.i(TAG, "$over (the engine has no move): ${u.fen}")
+            publish(s.copy(status = over, searching = false, lines = emptyList()))
+            return
+        }
         val top = u.lines.firstOrNull()
         if (top != null) best = top
         var mark = s.lastMove
@@ -241,6 +253,7 @@ class Analyst(
                 Look.INVALID
             }
             is BoardTracker.Result.Position -> {
+                if (r.back) DebugLog.i(TAG, "back to a position the game was in before${noteOf(tracker)}: ${r.board.placement()}")
                 start(r.board, r.whiteToMove, r.move, r.previous, r.previousWhiteToMove)
                 Look.NEW
             }
@@ -274,10 +287,11 @@ class Analyst(
             pendingGrade = null
             engine.stop()
             publish(OverlayState(status = over, corners = tracker.corners, blackAtBottom = tracker.blackAtBottom,
-                board = board, whiteToMove = white, playedMove = move))
+                board = board, whiteToMove = white, playedMove = move,
+                moveNumber = tracker.moveNumber, repetitions = tracker.repetitions))
             return
         }
-        DebugLog.i(TAG, "analyse $fen" + (move?.let { " after $it" } ?: ""))
+        DebugLog.i(TAG, "analyse $fen" + (move?.let { " after $it" } ?: "") + noteOf(tracker))
         publish(OverlayState(
             status = ANALYSING,
             searching = true,
@@ -286,9 +300,18 @@ class Analyst(
             board = board,
             whiteToMove = white,
             playedMove = move,
+            moveNumber = tracker.moveNumber,
+            repetitions = tracker.repetitions,
         ))
         requestId = engine.analyse(fen, lines, thinkMs)
     }
+
+    /** For the log: the move's number and a repetition, when known. */
+    private fun noteOf(t: BoardTracker): String =
+        (t.moveNumber?.let { " (move $it)" } ?: "") + if (t.repetitions > 1) " (${ordinal(t.repetitions)} time)" else ""
+
+    private fun ordinal(n: Int) = if (n % 100 in 11..13) "${n}th" else
+        when (n % 10) { 1 -> "${n}st"; 2 -> "${n}nd"; 3 -> "${n}rd"; else -> "${n}th" }
 
     fun stop() = engine.stop()
 

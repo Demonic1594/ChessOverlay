@@ -171,26 +171,145 @@ class TrackerTest {
         assertEquals("rnbqkbnr/1pp1pppp/p7/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1", u.board!!.fen(true))
     }
 
-    @Test fun steppingBackReadsThePiecesAnew() {
-        // 1. e4 a6 2. Ke2: the king moved, castling is over ...
-        val t = BoardTracker()
-        var b = Board.fromPlacement(start)
-        val first = after(start, "e2e4", "a7a6")   // before the king moved
-        t.accept(render(b), rec(b), null, strict = true)
-        for (m in listOf("e2e4", "a7a6", "e1e2")) {
+    /** The game follows `moves` from `from`, one read each, as in auto mode. */
+    private fun follow(t: BoardTracker, from: Board, vararg moves: String): Board {
+        var b = from
+        for (m in moves) {
             b = after(b.placement(), m)
             t.accept(render(b), rec(b), null, strict = true)
         }
+        return b
+    }
+
+    @Test fun steppingBackTakesThePositionAsItWas() {
+        val t = BoardTracker()
+        val s = Board.fromPlacement(start)
+        t.accept(render(s), rec(s), null, strict = true)
+        // 1. e4 a6 2. Ke2: the king moved, castling is over.
+        follow(t, s, "e2e4", "a7a6", "e1e2")
         assertEquals("kq", t.board!!.castling())
-        // ... but one ply back the king has not moved yet and still may. That
-        // position is known from its pieces only, as after a jump in the move list.
-        t.accept(render(first), rec(first), null, strict = true)
+        assertFalse(t.whiteToMove)
+        // Back one ply, to before 2.Ke2. Two squares differ, so it is read twice;
+        // then it is the position it was: White to move, castling still possible.
+        val back = after(start, "e2e4", "a7a6")
+        assertTrue(t.accept(render(back), rec(back), null, strict = true) is BoardTracker.Result.Invalid)
+        val r = t.accept(render(back), rec(back), null, strict = true) as BoardTracker.Result.Position
+        assertTrue(r.back)
+        assertTrue("White to move, as before 2.Ke2", t.whiteToMove)
         assertEquals("KQkq", t.board!!.castling())
-        // A jump of several plies to a position no move explains is read twice, then taken.
-        val jump = t.accept(render(Board.fromPlacement(start)), rec(Board.fromPlacement(start)), null, strict = true)
-        assertTrue(jump is BoardTracker.Result.Invalid)
-        t.accept(render(Board.fromPlacement(start)), rec(Board.fromPlacement(start)), null, strict = true)
+        assertEquals("a7a6", t.lastMove)
+        assertEquals(2, t.moveNumber)
+        // On again (2. Ke2 a5), then back several moves at once: six squares
+        // differ, so it is read once, and it is the start of the game.
+        follow(t, back, "e1e2", "a6a5")
+        assertTrue(t.whiteToMove)
+        val r0 = t.accept(render(s), rec(s), null, strict = true) as BoardTracker.Result.Position
+        assertTrue(r0.back)
+        assertTrue(t.whiteToMove)
+        assertEquals(1, t.moveNumber)
         assertEquals("$start w KQkq - 0 1", t.board!!.fen(true))
+        assertNull(t.lastMove)
+        // From there the game goes on, and the king's move counts again.
+        follow(t, s, "e2e4", "e7e5", "e1e2")
+        assertEquals("kq", t.board!!.castling())
+        assertEquals(2, t.moveNumber)
+    }
+
+    @Test fun repetitionsAndTheMoveNumber() {
+        val t = BoardTracker()
+        val s = Board.fromPlacement(start)
+        t.accept(render(s), rec(s), null, strict = true)
+        assertEquals(1, t.moveNumber)
+        assertEquals(1, t.repetitions)
+        // 1. Nf3 Nf6 2. Ng1 Ng8: the knights are home again, the start position
+        // for the second time. The last move is known, so it is a move, not a
+        // step back.
+        follow(t, s, "g1f3", "g8f6", "f3g1")
+        val again = t.accept(render(s), rec(s), null, strict = true) as BoardTracker.Result.Position
+        assertEquals("f6g8", again.move)
+        assertFalse(again.back)
+        assertTrue(t.whiteToMove)
+        assertEquals(3, t.moveNumber)
+        assertEquals(2, t.repetitions)
+        // 2. Nf3 Nf6 3. Ng1 Ng8: the third time.
+        follow(t, s, "g1f3", "g8f6", "f3g1")
+        t.accept(render(s), rec(s), null, strict = true)
+        assertEquals(3, t.repetitions)
+        assertEquals(5, t.moveNumber)
+        // The same pieces with a rook having moved are not the same position:
+        // that side cannot castle any more. 1. Nf3 Nf6 2. Rg1 Ng8 3. Rh1 Nf6.
+        val u = BoardTracker()
+        val k = Board.fromPlacement(start)
+        u.accept(render(k), rec(k), null, strict = true)
+        val both = follow(u, k, "g1f3", "g8f6")
+        follow(u, both, "h1g1", "f6g8", "g1h1")
+        assertEquals(after(start, "g1f3").placement(), u.board!!.placement())
+        assertEquals("Qkq", u.board!!.castling())
+        assertEquals("the pieces after 1. Nf3, but no kingside castling", 1, u.repetitions)
+        u.accept(render(both), rec(both), null, strict = true)   // 3... Nf6
+        assertEquals(both.placement(), u.board!!.placement())
+        assertEquals("Qkq", u.board!!.castling())
+        assertEquals("the pieces after 1... Nf6, but no kingside castling", 1, u.repetitions)
+        assertEquals(4, u.moveNumber)
+    }
+
+    @Test fun aGameJoinedLateHasNoMoveNumberUntilANewOneStarts() {
+        val t = BoardTracker()
+        val mid = after(start, "e2e4", "e7e5")
+        t.accept(render(mid), rec(mid), null, strict = true)
+        assertNull(t.moveNumber)
+        follow(t, mid, "g1f3")
+        assertNull(t.moveNumber)
+        // Back to where the game was joined (two squares differ: read twice): still no move number.
+        assertTrue(t.accept(render(mid), rec(mid), null, strict = true) is BoardTracker.Result.Invalid)
+        assertTrue(t.accept(render(mid), rec(mid), null, strict = true) is BoardTracker.Result.Position)
+        assertNull(t.moveNumber)
+        assertTrue(t.whiteToMove)
+        // A jump back to the start position (four squares differ: read twice) is another game, followed from move 1.
+        val s = Board.fromPlacement(start)
+        assertTrue(t.accept(render(s), rec(s), null, strict = true) is BoardTracker.Result.Invalid)
+        val r = t.accept(render(s), rec(s), null, strict = true) as BoardTracker.Result.Position
+        assertFalse(r.back)
+        assertEquals(1, t.moveNumber)
+        assertEquals(1, t.repetitions)
+        assertTrue(t.whiteToMove)
+    }
+
+    @Test fun steppingBackToAPositionTheGameNeverWentThroughHere() {
+        // The game joined after 1. e4 e5 2. Nf3, with the side to move set by hand.
+        val t = BoardTracker()
+        val f3 = after(start, "e2e4", "e7e5", "g1f3")
+        t.accept(render(f3), rec(f3), false, strict = true)
+        assertFalse(t.whiteToMove)
+        // Back one ply, to before 2. Nf3, a position this game never went through
+        // here: the knight went back, so White is to move.
+        val e5 = after(start, "e2e4", "e7e5")
+        assertTrue(t.accept(render(e5), rec(e5), null, strict = true) is BoardTracker.Result.Invalid)
+        val r = t.accept(render(e5), rec(e5), null, strict = true) as BoardTracker.Result.Position
+        assertFalse(r.back)
+        assertNull(r.move)
+        assertTrue(t.whiteToMove)
+        assertEquals("KQkq", t.board!!.castling())
+    }
+
+    @Test fun aWrongGuessOfTheSideIsSetRightByTheNextMove() {
+        // Joined after 1. e4 e5 2. Nf3: the side to move is guessed (the side at the bottom), wrongly.
+        val t = BoardTracker()
+        val f3 = after(start, "e2e4", "e7e5", "g1f3")
+        t.accept(render(f3), rec(f3), null, strict = true)
+        assertTrue(t.whiteToMove)
+        // Black moves: a move all the same, and from now on the side to move is right.
+        val c6 = after(start, "e2e4", "e7e5", "g1f3", "b8c6")
+        val r = t.accept(render(c6), rec(c6), null, strict = true) as BoardTracker.Result.Position
+        assertEquals("b8c6", r.move)
+        assertEquals("b8c6", t.lastMove)
+        assertTrue(t.whiteToMove)
+        // And back one ply from there: the position was taken with its side guessed
+        // wrong, but the knight went back, so Black is to move.
+        assertTrue(t.accept(render(f3), rec(f3), null, strict = true) is BoardTracker.Result.Invalid)
+        val back = t.accept(render(f3), rec(f3), null, strict = true) as BoardTracker.Result.Position
+        assertTrue(back.back)
+        assertFalse(t.whiteToMove)
     }
 
     @Test fun inCheckSideMustMove() {
