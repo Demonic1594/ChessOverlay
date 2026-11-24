@@ -152,8 +152,8 @@ class MainActivity : AppCompatActivity() {
             testEngine()
         }
         r.action(R.drawable.ic_grid, "Test recognition",
-            "Reads a board each way of running the models and says how long each takes on this phone. " +
-                "The fastest that reads it right is kept, for the next time the overlay starts.") { testRecognition() }
+            "Reads a board each way of running the models (the CPU with one, two or four threads; XNNPACK; NNAPI) and says " +
+                "how long each takes on this phone. The fastest that reads it right is kept, for the next time the overlay starts.") { testRecognition() }
         r.action(R.drawable.ic_copy, "Copy the debug log", "What the overlay saw and did: reads, engine starts and errors.") {
             getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("ChessOverlay log", DebugLog.dump()))
             toast("Debug log copied")
@@ -299,7 +299,7 @@ class MainActivity : AppCompatActivity() {
         thread(name = "recognition-test") {
             val report = try {
                 models.prepare()
-                val result = Tuner.tune(models.board, models.locator, Tuner.sample(assets.open(Tuner.SAMPLE)))
+                val result = Tuner.tune(models.board, models.locator, Tuner.sample(assets.open(Tuner.SAMPLE)), Tuner.candidates(all = true))
                 prefs.recognizerMode = result.chosen.toString()
                 prefs.recognizerTuned = true
                 DebugLog.i("Tuner", "recognition tested:\n${result.report()}")

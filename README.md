@@ -31,10 +31,12 @@ responsible for any penalty, ban or other consequence of misusing this app.
 - **Reading speed, measured on the phone**: most of the time of a read is
   the board model's, and which way of running it is fastest differs per
   phone. The first time the overlay starts, it times a read of a board
-  each way (ONNX Runtime's own CPU code with one, two or four threads;
-  XNNPACK; NNAPI), with the engine searching as it will be then, and keeps
-  the fastest that reads the board as the default does. Help and debug →
-  Test recognition shows the table and measures again.
+  with one, two and four threads of ONNX Runtime's own CPU code, with the
+  engine searching as it will be then, and keeps the fastest that reads
+  the board as the default does. Help and debug → Test recognition also
+  tries XNNPACK and NNAPI (other code: a provider's own, a phone's
+  driver), shows the table and keeps the fastest that reads it right;
+  should the app then die while reading, it goes back to the default.
 - **Reading in the light of the game**: during a game a new position can
   only follow the last one by a move, or a move each, so the most likely
   position the game can reach is taken when the picture allows it (a piece

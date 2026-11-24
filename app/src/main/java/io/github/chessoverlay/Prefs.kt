@@ -78,6 +78,12 @@ class Prefs(ctx: Context) {
         get() = p.getString("recognizer_mode", null)
         set(v) = p.edit().putString("recognizer_mode", v).apply()
 
+    /** The way of running the models the overlay is using, when it is not the default; cleared when the overlay stops.
+     *  If it is still set when the overlay next starts, the app died while using it: it is not used again. */
+    var recognizerInUse: String?
+        get() = p.getString("recognizer_in_use", null)
+        set(v) = p.edit().putString("recognizer_in_use", v).apply()
+
     /** Whether the models were measured on this phone (once; "Test recognition" measures again). */
     var recognizerTuned: Boolean
         get() = p.getBoolean("recognizer_tuned", false)

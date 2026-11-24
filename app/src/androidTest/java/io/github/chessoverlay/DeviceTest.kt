@@ -224,7 +224,12 @@ class DeviceTest {
      */
     @Test fun recognizerIsMeasuredOnAndroid() {
         assumeTrue("models not pushed to $models", File(models, "board.onnx").exists())
-        val result = Tuner.tune(File(models, "board.onnx"), File(models, "locator.onnx"), image("screen1"), warmUps = 2, runs = 5)
+        val result = Tuner.tune(File(models, "board.onnx"), File(models, "locator.onnx"), image("screen1"),
+            Tuner.candidates(all = true), warmUps = 2, runs = 5)
+        // The ways the overlay measures by itself all run.
+        Tuner.tune(File(models, "board.onnx"), File(models, "locator.onnx"), image("screen1"), warmUps = 1, runs = 2).let {
+            assertTrue(it.report(), it.timings.all { t -> t.usable })
+        }
         DebugLog.i("DeviceTest", "recognition measured:\n${result.report()}")
         storage.openOutputFile("tuning.txt").use { it.write(result.report().toByteArray()) }
         assertEquals("8/8/8/4p1K1/2k1P3/8/8/8", result.reading.placement)

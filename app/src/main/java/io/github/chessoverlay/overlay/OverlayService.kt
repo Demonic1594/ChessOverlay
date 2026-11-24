@@ -222,6 +222,7 @@ class OverlayService : Service() {
         engine = host
         val rec = Recognizer(models.board, models.locator, howToRead(models, host))
         recognizer = rec
+        if (rec.mode != RecognizerMode.DEFAULT) prefs.recognizerInUse = rec.mode.toString()
         val a = Analyst(rec, host) { st -> postState(st) }.apply {
             lines = prefs.lines
             thinkMs = prefs.thinkMs.toLong()
@@ -244,7 +245,15 @@ class OverlayService : Service() {
      * then, and kept. When measuring fails, the default is used.
      */
     private fun howToRead(models: ModelStore, host: EngineHost): RecognizerMode {
-        val saved = RecognizerMode.parse(prefs.recognizerMode)
+        var saved = RecognizerMode.parse(prefs.recognizerMode)
+        prefs.recognizerInUse?.let { died ->
+            // Set when the overlay starts with a way that is not the default, cleared when it stops: it is
+            // still set, so the app died while using it. Not that way again, or it would die at every start.
+            DebugLog.w(TAG, "the app went away while reading with $died; ${RecognizerMode.DEFAULT} is used from now on")
+            saved = RecognizerMode.DEFAULT
+            prefs.recognizerMode = null
+        }
+        prefs.recognizerInUse = null
         if (prefs.recognizerTuned) return saved
         postState(OverlayState(status = "Measuring how to read fastest (once)…"))
         try {
@@ -662,6 +671,7 @@ class OverlayService : Service() {
         draw = null; card = null
         val e = engine; val r = recognizer; val s = screen
         engine = null; recognizer = null; analyst = null; screen = null
+        prefs.recognizerInUse = null
         work.post {
             runCatching { e?.close() }
             runCatching { r?.close() }

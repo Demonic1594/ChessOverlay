@@ -19,8 +19,10 @@ import kotlin.math.abs
  * and its better time is what the others have to beat.
  *
  * The overlay does this once, the first time it starts, with the engine
- * searching as it will be then; the app's "Test recognition" shows the
- * table and keeps the result.
+ * searching as it will be then, among the ways that run the same code as
+ * the default does (the CPU with another number of threads); the app's
+ * "Test recognition" tries all of them, XNNPACK and NNAPI included, shows
+ * the table and keeps the result.
  */
 object Tuner {
     /** The sample board the app ships, to measure on: gzipped "w h" and a newline, then RGB bytes. */
@@ -65,15 +67,21 @@ object Tuner {
         private fun chosenTime() = timings.firstOrNull { it.mode == chosen }?.medianMs ?: 0
     }
 
-    /** The ways tried: the default (the CPU with two threads), the CPU with one and with four, XNNPACK with two and four, and NNAPI. */
-    fun candidates(): List<RecognizerMode> = listOf(
+    /**
+     * The ways to try. The default (the CPU with two threads) and the CPU with
+     * one and with four; with `all`, also XNNPACK with two and four and NNAPI,
+     * which run other code (a provider's own, a phone's driver): what "Test
+     * recognition" tries, not what the overlay does unasked.
+     */
+    fun candidates(all: Boolean = false): List<RecognizerMode> = listOf(
         RecognizerMode.DEFAULT,
         RecognizerMode(RecognizerMode.CPU, 1),
         RecognizerMode(RecognizerMode.CPU, 4),
+    ) + if (all) listOf(
         RecognizerMode(RecognizerMode.XNNPACK, 2),
         RecognizerMode(RecognizerMode.XNNPACK, 4),
         RecognizerMode(RecognizerMode.NNAPI, 1),
-    )
+    ) else emptyList()
 
     /**
      * Times each of `candidates` on the board of `sample`. `progress` is told

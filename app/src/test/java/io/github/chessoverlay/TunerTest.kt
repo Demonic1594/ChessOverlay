@@ -19,10 +19,14 @@ class TunerTest {
         val dir = System.getenv("MODELS")
         assumeTrue("set MODELS to run this test", dir != null && File(dir, "board.onnx").exists())
         val sample = Tuner.sample(javaClass.getResourceAsStream("/vision/screen1.rgb.gz")!!)
-        val result = Tuner.tune(File(dir, "board.onnx"), File(dir, "locator.onnx"), sample, warmUps = 2, runs = 4)
+        val result = Tuner.tune(File(dir, "board.onnx"), File(dir, "locator.onnx"), sample, Tuner.candidates(all = true), warmUps = 2, runs = 4)
         println(result.report())
         assertEquals("8/8/8/4p1K1/2k1P3/8/8/8", result.reading.placement)
-        assertEquals(Tuner.candidates().toSet(), result.timings.map { it.mode }.toSet())
+        assertEquals(Tuner.candidates(all = true).toSet(), result.timings.map { it.mode }.toSet())
+        // The ways the overlay measures by itself all ran and read right.
+        val own = Tuner.tune(File(dir, "board.onnx"), File(dir, "locator.onnx"), sample, warmUps = 1, runs = 2)
+        assertEquals(Tuner.candidates().toSet(), own.timings.map { it.mode }.toSet())
+        assertTrue(own.report(), own.timings.all { it.usable })
         // Every way that ran read the sample as the default does.
         for (t in result.timings) assertTrue("$t.mode: it ran but read differently", t.error != null || t.agreed == true)
         assertTrue("the default did not run", result.timings.any { it.mode == RecognizerMode.DEFAULT && it.usable })
