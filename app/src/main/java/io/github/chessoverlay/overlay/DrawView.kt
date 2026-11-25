@@ -70,11 +70,19 @@ class DrawView(ctx: Context, private val style: () -> BoardStyle) : View(ctx) {
         c.save()
         c.translate(-loc[0].toFloat(), -loc[1].toFloat())
         renderer.draw(c, shapes)
+        probe?.let { r -> c.drawRect(r[0].toFloat(), r[1].toFloat(), r[2].toFloat(), r[3].toFloat(), probePaint) }
         c.restore()
     }
+
+    /** A small square of PROBE_COLOR at (x0, y0, x1, y1) in screen pixels, or none: see OverlayService.probeCapture. */
+    var probe: IntArray? = null
+        set(v) { field = v; invalidate() }
+    private val probePaint = android.graphics.Paint().apply { color = PROBE_COLOR or (0xFF shl 24); isAntiAlias = false }
 
     companion object {
         private const val PREVIOUS_MS = 500L
         private const val RECENT_MS = 100L
+        /** Pure magenta: no board or app chrome is likely to show it exactly there. */
+        const val PROBE_COLOR = 0xFF00FF
     }
 }

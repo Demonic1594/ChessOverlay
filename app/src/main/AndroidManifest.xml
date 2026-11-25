@@ -6,8 +6,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- One-time download of the recognition models. -->
+    <!-- One-time download of the recognition models; looking up new versions. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Hand a new version, downloaded and checked, to Android's installer (the user confirms it). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Find engine apps that offer engines to chess GUIs (Open Exchange). -->
     <queries>

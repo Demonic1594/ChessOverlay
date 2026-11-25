@@ -293,6 +293,8 @@ class EngineHost(
         val defaults = mapOf(
             "Threads" to maxOf(1, minOf(4, cores / 2)).toString(),
             "Hash" to defaultHashMb.toString(),
+            // The win/draw/loss chances with the score (shown on the card), where the engine gives them.
+            "UCI_ShowWDL" to "true",
         )
         val all = LinkedHashMap<String, String>()
         for ((k, v) in defaults) if (options.keys.none { it.equals(k, true) }) all[k] = v

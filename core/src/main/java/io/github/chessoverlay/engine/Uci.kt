@@ -9,6 +9,15 @@ data class UciOption(
     val max: Int? = null,
     val vars: List<String> = emptyList(),
 ) {
+    /** The "option ..." line this was parsed from (as an engine would print it). */
+    fun toLine(): String = buildString {
+        append("option name ").append(name).append(" type ").append(type)
+        if (type != "button") append(" default ").append(default)
+        min?.let { append(" min ").append(it) }
+        max?.let { append(" max ").append(it) }
+        for (v in vars) append(" var ").append(v)
+    }
+
     companion object {
         private val KEYWORDS = setOf("name", "type", "default", "min", "max", "var")
 

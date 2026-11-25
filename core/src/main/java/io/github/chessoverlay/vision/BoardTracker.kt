@@ -67,6 +67,8 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
     private val history = ArrayList<Seen>()
     /** Whether [whiteToMove] is known (a move showed it, the user set it, a check forced it), not guessed from the picture. */
     private var sideKnown = false
+    /** The side to move is known from the game itself (moves followed), not from a setting or a guess. */
+    private var sideFromGame = false
 
     /** Moves played in the game when it was followed from its start position; else null. */
     var ply: Int? = null
@@ -131,7 +133,7 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
         corners = null; xs = null; ys = null; ref = null
         if (!keepGame) {
             board = null; lastMove = null
-            history.clear(); sideKnown = false; ply = null; repetitions = 1
+            history.clear(); sideKnown = false; sideFromGame = false; ply = null; repetitions = 1
             moveTimes.clear()
         }
     }
@@ -368,6 +370,21 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
             prev.copy().also { x -> moves.forEach { x.play(it) } }.castling() != twoBack.board.castling()
         val played = !takeback && moves != null && moves.isNotEmpty() && (moverWhite == prevWhite || !sideKnown)
         val playedMoves = if (played) moves else null
+        // A premove: a piece of the side not to move shown on its new square before its turn (chess.com draws a
+        // premove that way). The side to move is known from the game, the site does not highlight this move as
+        // the last one, and the position is none the game went through. It is not played until the other side
+        // has moved: the position stays (and its analysis), and when the reply comes, the reply and the premove
+        // are read as a move each.
+        val premove = strict && sideOverride == null && sideKnown && sideFromGame && backTo == null && prev != null &&
+            !played && !takeback && moves != null && moves.size == 1 &&
+            history.none { it.placement == read.placement() } && !(hl != null && hl.move == moves[0])
+        if (premove) {
+            TrackerLog.add("premove ${moves!![0]} shown; held until the other side moves", read.placement())
+            corners = rec.corners
+            blackAtBottom = black
+            remember(img, rec.corners)   // read again when the board changes from this, not at every check
+            return Result.Same
+        }
         // No move of the game explains the reading. It may be a position the
         // game went through before (a step back of one or more moves, a jump
         // to an earlier move): then it is taken as it was then, with what a
@@ -439,6 +456,7 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
             b.problem(prefer) != null || (hl != null && white == !hl.moverWhite)
         if (sameBoard) {
             sideKnown = known
+            if (sideOverride != null) sideFromGame = false
             repetitions = 1 + history.count { it.board.samePosition(b, white) }
         } else {
             if (seen != null) {
@@ -452,10 +470,10 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
                 while (history.size > MAX_HISTORY) history.removeAt(0)
             }
             when {
-                seen != null -> { ply = seen.ply; sideKnown = known || seen.sideKnown }
-                playedMoves != null -> { ply = oldPly?.plus(playedMoves.size); sideKnown = true }
-                b.placement() == START -> { ply = 0; sideKnown = true }
-                else -> { ply = null; sideKnown = known }
+                seen != null -> { ply = seen.ply; sideKnown = known || seen.sideKnown; sideFromGame = seen.sideKnown && sideOverride == null }
+                playedMoves != null -> { ply = oldPly?.plus(playedMoves.size); sideKnown = true; sideFromGame = sideOverride == null }
+                b.placement() == START -> { ply = 0; sideKnown = true; sideFromGame = sideOverride == null }
+                else -> { ply = null; sideKnown = known; sideFromGame = false }
             }
             repetitions = 1 + history.count { it.board.samePosition(b, white) }
             if (playedMoves != null) {

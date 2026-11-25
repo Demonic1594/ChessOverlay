@@ -89,11 +89,27 @@ class Prefs(ctx: Context) {
         get() = p.getBoolean("recognizer_tuned", false)
         set(v) = p.edit().putBoolean("recognizer_tuned", v).apply()
 
+    /** Look for new versions on GitHub Releases (at most once a day). */
+    var updateCheck: Boolean
+        get() = p.getBoolean("update_check", true)
+        set(v) = p.edit().putBoolean("update_check", v).apply()
+
+    /** When the latest release was last looked up. */
+    var lastUpdateCheck: Long
+        get() = p.getLong("last_update_check", 0L)
+        set(v) = p.edit().putLong("last_update_check", v).apply()
+
     fun engineOptions(engineId: String): Map<String, String> {
         val prefix = "$engineId\u0000"
         return engines.all.filterKeys { it.startsWith(prefix) }
             .mapKeys { it.key.removePrefix(prefix) }
             .mapValues { it.value.toString() }
+    }
+
+    /** Forgets every option saved for an engine (it was removed). */
+    fun clearEngineOptions(engineId: String) {
+        val prefix = "$engineId\u0000"
+        engines.edit().apply { engines.all.keys.filter { it.startsWith(prefix) }.forEach { remove(it) } }.apply()
     }
 
     fun setEngineOption(engineId: String, name: String, value: String?) {
