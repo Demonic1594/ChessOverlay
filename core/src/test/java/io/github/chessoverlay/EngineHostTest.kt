@@ -183,4 +183,42 @@ class EngineHostTest {
         }
         dir.deleteRecursively()
     }
+
+    /** What the host sends: MultiPV only when it changes, "ucinewgame" once when a new game is announced. */
+    @Test fun optionsOnceAndANewGame() {
+        val dir = createTempDir("said")
+        val heard = File(dir, "heard.txt")
+        val bin = File(dir, "said.sh")
+        bin.writeText("""
+            #!/bin/sh
+            while read -r line; do
+              echo "${'$'}line" >> "${heard.absolutePath}"
+              case "${'$'}line" in
+                uci) echo "id name Said"; echo "option name MultiPV type spin default 1 min 1 max 5"
+                     echo "option name UCI_AnalyseMode type check default false"; echo uciok ;;
+                isready) echo readyok ;;
+                go*) echo "info depth 1 seldepth 1 multipv 1 score cp 5 nodes 10 pv e2e4" ;;
+                stop) echo "bestmove e2e4" ;;
+                quit) exit 0 ;;
+              esac
+            done
+        """.trimIndent() + "\n")
+        bin.setExecutable(true)
+        val fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        EngineHost(bin, dir, emptyMap(), onUpdate = {}, onStatus = {}).use { host ->
+            host.analyse(fen, 1, 0); Thread.sleep(400)
+            host.analyse(fen.replace(" w ", " b "), 1, 0); Thread.sleep(400)
+            host.newGame()
+            host.analyse(fen, 2, 0); Thread.sleep(400)
+        }
+        val said = heard.readLines()
+        println(said.joinToString(" | "))
+        assertTrue("MultiPV 1 once: $said", said.count { it == "setoption name MultiPV value 1" } == 1)
+        assertTrue("then 2: $said", said.count { it == "setoption name MultiPV value 2" } == 1)
+        assertTrue("analyse mode once: $said", said.count { it.startsWith("setoption name UCI_AnalyseMode") } == 1)
+        val ng = said.indexOf("ucinewgame")
+        assertTrue("one ucinewgame: $said", ng > 0 && said.count { it == "ucinewgame" } == 1)
+        assertTrue("before the third search: $said", said.withIndex().count { (i, l) -> l.startsWith("go") && i > ng } == 1)
+        dir.deleteRecursively()
+    }
 }

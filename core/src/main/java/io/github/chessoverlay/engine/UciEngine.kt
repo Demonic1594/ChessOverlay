@@ -56,6 +56,14 @@ class UciEngine(
         private set
     private val sinceGo = ArrayDeque<String>()
     @Volatile private var listenerFailed = false
+    private var sentMultiPv = -1
+    private var analyseModeSent = false
+
+    /**
+     * A new game: the engine forgets what it learnt (hash, history) about
+     * the last one. Call between searches.
+     */
+    fun newGame(): Boolean = send("ucinewgame") && isReady()
 
     /** Start the process and run the "uci" handshake. Throws on failure. */
     fun start(timeoutMs: Long = 10_000) {
@@ -117,8 +125,10 @@ class UciEngine(
            onUpdate: (List<PvLine>, Boolean) -> Unit): Boolean {
         val multi = hasOption("MultiPV")
         collector = PvCollector(if (multi) multipv else 1)
-        if (multi) setOption("MultiPV", multipv.toString())
-        if (hasOption("UCI_AnalyseMode")) setOption("UCI_AnalyseMode", "true")
+        // Options are only sent when they change: each one costs the engine a
+        // little work (MultiPV resizes its root move list) before every search.
+        if (multi && sentMultiPv != multipv && setOption("MultiPV", multipv.toString())) sentMultiPv = multipv
+        if (!analyseModeSent && hasOption("UCI_AnalyseMode")) analyseModeSent = setOption("UCI_AnalyseMode", "true")
         if (!isReady()) {
             DebugLog.w(TAG, "$name: no readyok within 5 s before go (dead=$dead)${tailText()}")
             return false
@@ -199,9 +209,11 @@ class UciEngine(
     private fun flushLater(c: PvCollector, seq: Long) {
         try {
             flusher.schedule({
-                if (seq == lineSeq && c === collector) {
-                    val set = synchronized(c) { c.flush() }
-                    if (set != null) notify(set, false)
+                // Checked and passed on under the collector's lock, as the
+                // reader adds and passes on lines: a set flushed here can never
+                // arrive after a newer one from the reader.
+                synchronized(c) {
+                    if (seq == lineSeq && c === collector) c.flush()?.let { notify(it, false) }
                 }
             }, FLUSH_MS, TimeUnit.MILLISECONDS)
         } catch (_: java.util.concurrent.RejectedExecutionException) {
@@ -240,10 +252,13 @@ class UciEngine(
                         if (pv.pv.isNotEmpty()) {
                             pvSinceGo++
                             val c = collector
-                            val seq = ++lineSeq
+                            var seq = 0L
                             var waiting = false
-                            val set = synchronized(c) { c.add(pv).also { waiting = c.waiting } }
-                            if (set != null) notify(set, false)
+                            synchronized(c) {
+                                seq = ++lineSeq
+                                c.add(pv)?.let { notify(it, false) }
+                                waiting = c.waiting
+                            }
                             if (waiting) flushLater(c, seq)
                         }
                     }
@@ -252,8 +267,7 @@ class UciEngine(
                     noteSinceGo(line)
                     bestMoveLine = line
                     val c = collector
-                    lineSeq++
-                    notify(synchronized(c) { c.finish() }, true)
+                    synchronized(c) { lineSeq++; notify(c.finish(), true) }
                     bestMove?.countDown()
                 }
             }

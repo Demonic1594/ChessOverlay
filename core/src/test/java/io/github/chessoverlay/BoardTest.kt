@@ -285,4 +285,21 @@ class CardLayoutTest {
         assertNull(Board.fromPlacement("8/8/6R1/3P4/1kP1N3/pP5P/P2B2P1/5K2").outcome(true))
         assertNull(Board.fromPlacement("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR").outcome(true))
     }
+
+    private fun perft(b: Board, white: Boolean, depth: Int): Long {
+        if (depth == 0) return 1
+        var n = 0L
+        for (m in b.legalMoves(white)) n += if (depth == 1) 1 else perft(b.copy().also { it.play(m) }, !white, depth - 1)
+        return n
+    }
+
+    /** The move generator against the published perft counts (castling, en passant, promotions, pins). */
+    @Test fun perftCounts() {
+        val start = Board.fromPlacement(Board.START_PLACEMENT)
+        assertEquals(listOf(20L, 400L, 8902L, 197281L), (1..4).map { perft(start, true, it) })
+        val kiwipete = Board.fromPlacement("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R")
+        assertEquals(listOf(48L, 2039L, 97862L), (1..3).map { perft(kiwipete, true, it) })
+        val endgame = Board.fromPlacement("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8")
+        assertEquals(listOf(14L, 191L, 2812L, 43238L), (1..4).map { perft(endgame, true, it) })
+    }
 }

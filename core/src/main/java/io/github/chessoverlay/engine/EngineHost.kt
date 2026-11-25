@@ -39,6 +39,8 @@ class EngineHost(
     private val onStatus: (String) -> Unit,
     private val startTimeoutMs: Long = 30_000,
     private val silentMs: Long = SILENT_MS,
+    /** Hash in MB unless the user set one (the app picks it from the phone's memory). */
+    private val defaultHashMb: Int = 64,
 ) : AutoCloseable {
     private val exec = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "engine-host").apply { isDaemon = true } }
     private val ids = AtomicLong(0)
@@ -63,6 +65,8 @@ class EngineHost(
     @Volatile var sentOptions: List<String> = emptyList()
         private set
     @Volatile private var firstLinesPending = false
+    /** "ucinewgame" is sent before the next search. */
+    @Volatile private var pendingNewGame = false
 
     private data class Request(val id: Long, val fen: String, val multipv: Int, val movetimeMs: Long)
 
@@ -79,6 +83,12 @@ class EngineHost(
         submit { run(r) }
         return r.id
     }
+
+    /**
+     * A new game begins: the engine is told before the next analysis, so
+     * what it remembers of the last game (its hash) does not steer this one.
+     */
+    fun newGame() { pendingNewGame = true }
 
     fun stop() = submit {
         current = null
@@ -113,6 +123,10 @@ class EngineHost(
         }
         val e = ensureEngine() ?: return
         e.stop()
+        if (pendingNewGame) {
+            pendingNewGame = false
+            if (!e.newGame()) DebugLog.w(TAG, "${e.name}: no readyok after ucinewgame")
+        }
         current = r
         val ok = e.go(r.fen, r.multipv, r.movetimeMs) { lines, finished ->
             if (lines.isNotEmpty() && firstLinesPending) {
@@ -154,7 +168,7 @@ class EngineHost(
             // Checkmate or stalemate: there is no line to give. The overlay is
             // told, so it does not wait for lines (its own rule check may have
             // allowed a move that a picture cannot show to be impossible).
-            DebugLog.i(TAG, "${e.name}: no legal move in $r.fen (${e.bestMoveLine})")
+            DebugLog.i(TAG, "${e.name}: no legal move in ${r.fen} (${e.bestMoveLine})")
             if (r.id == ids.get()) onUpdate(AnalysisUpdate(r.id, r.fen, emptyList(), finished = true, noLegalMove = true))
             return
         }
@@ -223,7 +237,7 @@ class EngineHost(
         // Sensible defaults for a phone unless the user set them.
         val defaults = mapOf(
             "Threads" to maxOf(1, minOf(4, cores / 2)).toString(),
-            "Hash" to "64",
+            "Hash" to defaultHashMb.toString(),
         )
         val all = LinkedHashMap<String, String>()
         for ((k, v) in defaults) if (options.keys.none { it.equals(k, true) }) all[k] = v
@@ -241,7 +255,11 @@ class EngineHost(
         val r = current
         DebugLog.e(TAG, "engine exited (code $code) while analysing ${r?.fen ?: "nothing"}; " +
             "last output: ${dead.outputTail().takeLast(8).joinToString(" | ")}")
-        if (r != null) crashesByFen[r.fen] = (crashesByFen[r.fen] ?: 0) + 1
+        if (r != null) {
+            // Only the positions of this session that crashed it; kept small.
+            if (crashesByFen.size >= 64) crashesByFen.clear()
+            crashesByFen[r.fen] = (crashesByFen[r.fen] ?: 0) + 1
+        }
         onStatus("Engine stopped (code $code); restarting…")
         // Resume the request that was running, unless a newer one is queued.
         if (r != null && r.id == ids.get()) run(r) else ensureEngine()

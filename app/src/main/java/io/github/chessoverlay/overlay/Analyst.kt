@@ -398,6 +398,10 @@ class Analyst(
             lines = listOfNotNull(expected),
             provisional = expected != null,
         ))
+        // The starting position after another one: a new game, so the engine forgets the last.
+        val before = s.board
+        if (board.placement() == Board.START_PLACEMENT && white && before != null &&
+            before.placement() != Board.START_PLACEMENT) engine.newGame()
         requestId = engine.analyse(fen, lines, thinkMs)
     }
 
