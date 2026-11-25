@@ -106,7 +106,17 @@ class Recognizer(boardModel: File, locatorModel: File, val mode: RecognizerMode 
     fun recognise(img: Img, legality: Boolean = true, knownCorners: List<FloatArray>? = null, sharpen: Boolean = true): Recognition {
         if (knownCorners != null) return read(img, knownCorners, legality)
         val t0 = System.nanoTime()
-        val located = locate(img)
+        var located = locate(img)
+        // A screen shows a board upright. A skewed shape is the locator half on something else (a board beside
+        // panels of the page): looked for again within a region somewhat wider than that shape, where the board
+        // is most of the picture, it is found. Kept only if it then stands upright.
+        if (!isAxisAligned(located)) {
+            val again = locateAround(img, located)
+            if (again != null && isAxisAligned(BoardEdges.refine(img, again))) {
+                lastRelocated = true
+                located = again
+            }
+        }
         val find = (System.nanoTime() - t0) / 1_000_000
         // The locator's corners are a little off; the board's own edges say where it is.
         val edges = if (sharpen) BoardEdges.refine(img, located) else located
@@ -115,7 +125,8 @@ class Recognizer(boardModel: File, locatorModel: File, val mode: RecognizerMode 
         // Where the two disagree, the board is read at both and the surer reading kept (as fenshot does): edges
         // can be misled by a site's frame or a strip of the page, and corners a fifth of a square off cut every
         // square and lower the model's certainty across the board.
-        lastAlignment = null
+        lastAlignment = if (lastRelocated) "found again around a skewed first find" else null
+        lastRelocated = false
         if (edges !== located && cornerShift(edges, located) > ALIGN_SHIFT && r.meanConfidence() < SURE) {
             val alt = read(img, located, legality)
             val a = r.meanConfidence(); val b = alt.meanConfidence()
@@ -143,6 +154,20 @@ class Recognizer(boardModel: File, locatorModel: File, val mode: RecognizerMode 
         val t3 = System.nanoTime()
         lastTiming = "prepare ${ms(t0, t1)} ms, model ${ms(t1, t2)} ms, rest ${ms(t2, t3)} ms"
         return r
+    }
+
+    /** The last located read had to look again around a skewed first find (for the log). */
+    @Volatile var lastRelocated = false
+
+    /** The locator again, on the region around `k` widened by RELOCATE_PAD of its side; null if too small. */
+    private fun locateAround(img: Img, k: List<FloatArray>): List<FloatArray>? {
+        val b = cornersToBox(k)
+        val pad = RELOCATE_PAD * max(b[2] - b[0], b[3] - b[1])
+        val x0 = max(0, (b[0] - pad).toInt()); val y0 = max(0, (b[1] - pad).toInt())
+        val x1 = min(img.w, (b[2] + pad).toInt()); val y1 = min(img.h, (b[3] + pad).toInt())
+        if (x1 - x0 < 32 || y1 - y0 < 32) return null
+        val r = refineBox(img, cornersToBox(locateOnce(img, x0, y0, x1 - x0, y1 - y0).map { floatArrayOf(it[0] + x0, it[1] + y0) }))
+        return locateOnce(img, r[0], r[1], r[2] - r[0], r[3] - r[1]).map { floatArrayOf(it[0] + r[0], it[1] + r[1]) }
     }
 
     /** Board corners (TL, TR, BR, BL) in image pixels. */
@@ -184,6 +209,8 @@ class Recognizer(boardModel: File, locatorModel: File, val mode: RecognizerMode 
         fun boxToCorners(x0: Float, y0: Float, x1: Float, y1: Float) =
             listOf(floatArrayOf(x0, y0), floatArrayOf(x1, y0), floatArrayOf(x1, y1), floatArrayOf(x0, y1))
 
+        /** How much wider than a skewed first find the region looked in again is (of its side). */
+        const val RELOCATE_PAD = 0.35f
         /** Edges and locator further apart than this (of the side): both alignments are read. */
         const val ALIGN_SHIFT = 0.02f
         /** A reading this sure of the whole board needs no second alignment. */
