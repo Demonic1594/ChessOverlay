@@ -40,7 +40,7 @@ class EngineRegistry(private val ctx: Context) {
 
     fun imported(): List<EngineInfo> {
         val dir = File(engineDir, "user")
-        return (dir.listFiles() ?: emptyArray()).filter { it.isFile }.sortedBy { it.name }
+        return (dir.listFiles() ?: emptyArray()).filter { it.isFile && !it.name.endsWith(".tmp") }.sortedBy { it.name }
             .map { EngineInfo("user:${it.name}", it.name, it, EngineInfo.Kind.IMPORTED) }
     }
 
@@ -50,14 +50,35 @@ class EngineRegistry(private val ctx: Context) {
         val dest = File(File(engineDir, "user").apply { mkdirs() }, safe)
         ctx.contentResolver.openInputStream(uri).use { input ->
             requireNotNull(input) { "cannot read $uri" }
-            dest.outputStream().use { input.copyTo(it) }
+            copyAtomically(input, dest)
         }
-        dest.setExecutable(true, false)
         return EngineInfo("user:${dest.name}", dest.name, dest, EngineInfo.Kind.IMPORTED)
     }
 
     fun delete(e: EngineInfo) {
-        if (e.kind == EngineInfo.Kind.IMPORTED || e.kind == EngineInfo.Kind.OPEN_EXCHANGE) e.file.delete()
+        if (e.kind == EngineInfo.Kind.IMPORTED || e.kind == EngineInfo.Kind.OPEN_EXCHANGE) {
+            e.file.delete()
+            File(e.file.path + ".stamp").delete()
+        }
+    }
+
+    /**
+     * Copies to a temporary file and renames it into place: an interrupted
+     * copy (the app killed, the disk full) never leaves half an engine
+     * that would then be started.
+     */
+    private fun copyAtomically(input: java.io.InputStream, dest: File) {
+        val tmp = File(dest.path + ".tmp")
+        try {
+            tmp.outputStream().use { input.copyTo(it) }
+            tmp.setExecutable(true, false)
+            if (!tmp.renameTo(dest)) {
+                dest.delete()
+                if (!tmp.renameTo(dest)) throw java.io.IOException("could not move ${tmp.name} into place")
+            }
+        } finally {
+            tmp.delete()
+        }
     }
 
     /** Engines offered by installed Open Exchange engine apps, copied in. */
@@ -80,15 +101,18 @@ class EngineRegistry(private val ctx: Context) {
                 @Suppress("DiscouragedApi")
                 val id = res.getIdentifier("enginelist", "xml", ai.packageName)
                 if (id == 0) continue
+                // Copied again when the engine app was updated (a new engine version), not only once.
+                @Suppress("DEPRECATION")
+                val stamp = runCatching { pm.getPackageInfo(ai.packageName, 0).lastUpdateTime }.getOrDefault(0L)
                 for ((title, fileName, targets) in parseEngineList(res.getXml(id))) {
                     if (abi !in targets) continue
                     val dest = File(File(engineDir, "oex").apply { mkdirs() }, "${ai.packageName}_$fileName")
-                    if (!dest.exists()) {
+                    val stampFile = File(dest.path + ".stamp")
+                    val copied = runCatching { stampFile.readText().toLong() }.getOrNull()
+                    if (!dest.exists() || copied != stamp) {
                         val uri = Uri.parse("content://$authority/$fileName")
-                        ctx.contentResolver.openInputStream(uri)?.use { input ->
-                            dest.outputStream().use { input.copyTo(it) }
-                        } ?: continue
-                        dest.setExecutable(true, false)
+                        ctx.contentResolver.openInputStream(uri)?.use { input -> copyAtomically(input, dest) } ?: continue
+                        stampFile.writeText(stamp.toString())
                     }
                     result.add(EngineInfo("oex:${ai.packageName}/$fileName", title, dest, EngineInfo.Kind.OPEN_EXCHANGE))
                 }
