@@ -45,6 +45,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
 
       - name: Recognition models (cached)
         uses: actions/cache@v4
@@ -89,16 +90,32 @@ jobs:
 
       # The engine comes after the tests: a change in the Kotlin shows in the
        # tests a few minutes sooner, and they do not need it.
+      # A branch or tag given by hand is resolved to its commit, so the cache never serves an older build of it.
+      - name: Engine commit
+        run: |
+          sha=$(git ls-remote https://github.com/Demonic1594/Smotherfish.git "$ENGINE_REF" | head -1 | cut -f1)
+          echo "ENGINE_SHA=${sha:-$ENGINE_REF}" >> "$GITHUB_ENV"
+
+      # The engine only changes with ENGINE_REF (and the NDK): built once, then taken from the cache.
+      - name: Smotherfish arm64-v8a (cached)
+        id: engine-arm64-v8a
+        uses: actions/cache@v4
+        with:
+          path: engine-arm64-v8a
+          key: smotherfish-arm64-v8a-${{ env.ENGINE_SHA }}-ndk${{ env.NDK_VERSION }}
+
       - name: Android NDK
+        if: steps.engine-arm64-v8a.outputs.cache-hit != 'true'
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION" > /dev/null
           echo "NDK_BIN=$ANDROID_HOME/ndk/$NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_ENV"
 
       - name: Build Smotherfish (arm64, static)
+        if: steps.engine-arm64-v8a.outputs.cache-hit != 'true'
         run: |
           git init -q engine
           git -C engine remote add origin https://github.com/Demonic1594/Smotherfish.git
-          git -C engine fetch -q --depth 1 origin "$ENGINE_REF"
+          git -C engine fetch -q --depth 1 origin "$ENGINE_SHA"
           git -C engine checkout -q FETCH_HEAD
           cd engine/src
           make -j"$(nproc)" net
@@ -106,9 +123,15 @@ jobs:
             || { tail -40 ../build.log; exit 1; }
           "$NDK_BIN/llvm-strip" stockfish
           file stockfish
-          mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a"
-          cp stockfish "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libsmotherfish.so"
-          echo "Bundled Smotherfish $(git -C .. rev-parse --short HEAD) ($ENGINE_REF)"
+          mkdir -p "$GITHUB_WORKSPACE/engine-arm64-v8a"
+          cp stockfish "$GITHUB_WORKSPACE/engine-arm64-v8a/libsmotherfish.so"
+          git -C .. rev-parse --short HEAD > "$GITHUB_WORKSPACE/engine-arm64-v8a/commit"
+
+      - name: Bundle Smotherfish (arm64-v8a)
+        run: |
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          cp engine-arm64-v8a/libsmotherfish.so app/src/main/jniLibs/arm64-v8a/
+          echo "Bundled Smotherfish $(cat engine-arm64-v8a/commit) ($ENGINE_REF)"
 
       # The project's signing key, for the APKs meant for installing (pushes
       # to main, runs by hand). Not for pull requests: their code could print
@@ -207,6 +230,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
 
       - uses: actions/download-artifact@v4
         with:
@@ -244,6 +268,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
 
       - name: Enable KVM
         run: |
@@ -251,16 +276,32 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      # A branch or tag given by hand is resolved to its commit, so the cache never serves an older build of it.
+      - name: Engine commit
+        run: |
+          sha=$(git ls-remote https://github.com/Demonic1594/Smotherfish.git "$ENGINE_REF" | head -1 | cut -f1)
+          echo "ENGINE_SHA=${sha:-$ENGINE_REF}" >> "$GITHUB_ENV"
+
+      # The engine only changes with ENGINE_REF (and the NDK): built once, then taken from the cache.
+      - name: Smotherfish x86_64 (cached)
+        id: engine-x86_64
+        uses: actions/cache@v4
+        with:
+          path: engine-x86_64
+          key: smotherfish-x86_64-${{ env.ENGINE_SHA }}-ndk${{ env.NDK_VERSION }}
+
       - name: Android NDK
+        if: steps.engine-x86_64.outputs.cache-hit != 'true'
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION" > /dev/null
           echo "NDK_BIN=$ANDROID_HOME/ndk/$NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_ENV"
 
       - name: Build Smotherfish (x86_64, for the emulator)
+        if: steps.engine-x86_64.outputs.cache-hit != 'true'
         run: |
           git init -q engine
           git -C engine remote add origin https://github.com/Demonic1594/Smotherfish.git
-          git -C engine fetch -q --depth 1 origin "$ENGINE_REF"
+          git -C engine fetch -q --depth 1 origin "$ENGINE_SHA"
           git -C engine checkout -q FETCH_HEAD
           cd engine/src
           make -j"$(nproc)" net
@@ -268,8 +309,15 @@ jobs:
             || { tail -40 ../build.log; exit 1; }
           "$NDK_BIN/llvm-strip" stockfish
           file stockfish
-          mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs/x86_64"
-          cp stockfish "$GITHUB_WORKSPACE/app/src/main/jniLibs/x86_64/libsmotherfish.so"
+          mkdir -p "$GITHUB_WORKSPACE/engine-x86_64"
+          cp stockfish "$GITHUB_WORKSPACE/engine-x86_64/libsmotherfish.so"
+          git -C .. rev-parse --short HEAD > "$GITHUB_WORKSPACE/engine-x86_64/commit"
+
+      - name: Bundle Smotherfish (x86_64)
+        run: |
+          mkdir -p app/src/main/jniLibs/x86_64
+          cp engine-x86_64/libsmotherfish.so app/src/main/jniLibs/x86_64/
+          echo "Bundled Smotherfish $(cat engine-x86_64/commit) ($ENGINE_REF)"
 
       - name: Recognition models (cached)
         uses: actions/cache@v4
