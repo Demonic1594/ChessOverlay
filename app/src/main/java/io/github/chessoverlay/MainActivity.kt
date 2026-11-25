@@ -314,6 +314,11 @@ class MainActivity : AppCompatActivity() {
                 "FAIR PLAY",
                 "Engine help in live games against people is cheating. Chess sites detect it and ban accounts. " +
                     "How you use this app is your responsibility.",
+                "ABOUT",
+                "ChessOverlay, copyright (C) 2026 Demonic1594. Free software under the GNU General Public License, " +
+                    "version 3, with no warranty. Source: github.com/Demonic1594/ChessOverlay. " +
+                    "Smotherfish by Demonic1594, based on Stockfish by the Stockfish developers (GPL-3.0). " +
+                    "Board recognition: chessimg2pos by Mattia Dicio (MIT); ONNX Runtime by Microsoft (MIT).",
             ).joinToString("\n\n"))
             .setPositiveButton("OK", null)
             .show()
