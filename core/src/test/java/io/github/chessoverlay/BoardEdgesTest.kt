@@ -99,4 +99,20 @@ class BoardEdgesTest {
         assertBox(img, box(4, 64, 316, 382), 10f, 70f, 310f, 370f)
         assertBox(img, box(12, 75, 308, 366), 10f, 70f, 310f, 370f)
     }
+
+    /**
+     * From a phone (chess.com, portrait): the board spans the screen's width,
+     * and between it and the light bar above lies a dark strip, which the top
+     * edge took for board. The corners came out 36 px high and 16 px off the
+     * screen on each side; the arrows would have sat a fifth of a square high.
+     */
+    @Test fun aBoardEdgeToEdgeUnderADarkStrip() {
+        val w = 360; val side = 360; val y0 = 120
+        val img = picture(w = w, h = 640, x0 = 0, y0 = y0, side = side, page = 0x2B2A28)
+        // The light bar above, then the dark strip (8 px) right above the board.
+        for (y in 40 until y0 - 8) for (x in 0 until w) img.px[y * w + x] = 0xD2D2D4
+        for (y in y0 - 8 until y0) for (x in 0 until w) img.px[y * w + x] = 0x252422
+        // The locator's box: about right, its top a little high.
+        assertBox(img, box(1, 115, 359, 480), 0f, y0.toFloat(), w.toFloat(), (y0 + side).toFloat(), within = 1.5f)
+    }
 }
