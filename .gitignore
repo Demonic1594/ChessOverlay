@@ -8,3 +8,7 @@ app/src/main/jniLibs/
 models/
 app/src/main/assets/models/
 .kotlin/
+
+# Python bytecode
+__pycache__/
+*.pyc

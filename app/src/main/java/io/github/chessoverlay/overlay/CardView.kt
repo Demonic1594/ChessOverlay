@@ -107,6 +107,7 @@ class CardView(
                 } else if (dragging) {
                     listener.onDrag((e.rawX - downX).toInt(), (e.rawY - downY).toInt(), true)
                 } else {
+                    performClick()   // for accessibility services; the tap itself is handled here
                     val l = current(width)
                     val b = l.buttonAt(e.x, e.y)
                     if (b != null) listener.onButton(b)
@@ -122,4 +123,6 @@ class CardView(
         }
         return true
     }
+
+    override fun performClick(): Boolean = super.performClick()
 }
