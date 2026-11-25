@@ -125,6 +125,7 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
      * goes on from it, side to move and all.
      */
     fun reset(keepGame: Boolean = false) {
+        TrackerLog.add(if (keepGame) "board lost; the game is kept" else "reset: a new game")
         corners = null; xs = null; ys = null; ref = null; pendingFast = null
         if (!keepGame) {
             board = null; lastMove = null
@@ -220,6 +221,7 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
      * the position before them, so a wrong guess is put right.
      */
     fun applyFast(moves: List<String>): Result.Position {
+        TrackerLog.add("seen at once: ${moves.joinToString(" ")}")
         val prev = board ?: throw IllegalStateException("no game")
         val prevWhite = whiteToMove
         pendingFast = Fast(prev, prevWhite, lastMove)
@@ -291,6 +293,24 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
      * that, the plain reading, turned the way Orientation decides.
      */
     fun accept(img: Img, rec: Recognition, sideOverride: Boolean?, strict: Boolean = false): Result {
+        val before = board?.placement()
+        val r = acceptRead(img, rec, sideOverride, strict)
+        TrackerLog.add(when (r) {
+            is Result.Same -> "same" + (if (sideOverride != null) " (side set by hand)" else "")
+            is Result.Invalid -> "held: ${r.reason}; read ${rec.placement} (${(rec.confidence * 100).toInt()}%)"
+            is Result.Position -> when {
+                r.move != null -> "move ${r.move}"
+                r.back -> "back to an earlier position"
+                before == null -> "first position"
+                Board.findTwoMoves(r.previous ?: r.board, r.board, r.previousWhiteToMove) != null -> "two moves"
+                else -> "jump (no move explains it)"
+            } + ", ${if (r.whiteToMove) "White" else "Black"} to move" + (if (sideKnown) "" else " (guessed)") +
+                lastSeen?.let { "; highlight ${it.move}" }.orEmpty()
+        }, board?.fen(whiteToMove))
+        return r
+    }
+
+    private fun acceptRead(img: Img, rec: Recognition, sideOverride: Boolean?, strict: Boolean): Result {
         abandonFast()   // judge the reading from the position before any move seen at once
         val prev = board
         val prevWhite = whiteToMove
@@ -352,9 +372,14 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
         val b = if (useHl) b0.afterSeenMove(hl!!.move) else b0
         val diff = if (prev == null) 64 else (0..63).count { prev[it] != b[it] }
         if (prev != null && playedMoves == null && strict && sideOverride == null && !sameBoard) {
-            if (diff <= SMALL_CHANGE && suspect != b.placement()) {
+            // Or a change no move explains read with some squares in doubt: a wrong position analysed is worse
+            // than one read later, so it too must be read the same way twice. A sure reading (a new game set
+            // up, another position opened) and a position the game went through before count at once.
+            val unsure = seen == null && rec.confidence < UNSURE_READ
+            if ((diff <= SMALL_CHANGE || unsure) && suspect != b.placement()) {
                 suspect = b.placement()
-                return Result.Invalid("no move explains it; reading again")
+                return Result.Invalid(if (diff <= SMALL_CHANGE) "no move explains it; reading again"
+                    else "unsure of the reading (${(rec.confidence * 100).toInt()}%); reading again")
             }
         }
         suspect = null
@@ -431,6 +456,8 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
 
         /** Changed squares up to which an unexplained change is suspected to be a misread. */
         private const val SMALL_CHANGE = 4
+        /** Below this certainty of its least sure square, an unexplained reading is read again before it counts. */
+        const val UNSURE_READ = 0.8f
 
         /** Positions kept of the line followed (a game has a few hundred at most). */
         private const val MAX_HISTORY = 1024

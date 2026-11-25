@@ -34,6 +34,8 @@ class BenchTest {
         val pieces = c.getString("pieces")
         val coords = c.getBoolean("coords")
         val phone = c.getBoolean("phone")
+        val edge = c.optBoolean("edge", false)
+        val highlighted = (c.optJSONArray("highlight")?.length() ?: 0) > 0
         val side = box[2] - box[0]
         fun corners(): List<FloatArray> = listOf(
             floatArrayOf(box[0].toFloat(), box[1].toFloat()), floatArrayOf(box[2].toFloat(), box[1].toFloat()),
@@ -78,7 +80,9 @@ class BenchTest {
                     if (locate) offs += off
                     val ok = r.placement == b.fen && r.blackAtBottom == b.black
                     t.add(listOf("all", "pieces ${b.pieces}", "theme ${b.theme}", if (b.black) "black at the bottom" else "white at the bottom",
-                        if (b.coords) "with coordinates" else "without coordinates", if (b.phone) "phone screen" else "board alone",
+                        if (b.coords) "with coordinates" else "without coordinates",
+                        if (b.edge) "phone screen, edge to edge" else if (b.phone) "phone screen" else "board alone",
+                        if (b.highlighted) "last move highlighted" else "no highlight",
                         "side ${if (b.side < 400) "<400" else if (b.side < 700) "400-699" else ">=700"}"), ok)
                     if (!ok && bad.size < 40) bad += "${b.file}: ${b.theme}/${b.pieces}${if (b.black) " black" else ""}: " +
                         "sure ${String.format(java.util.Locale.US, "%.2f", r.confidence)}; got ${r.placement}" + (if (r.blackAtBottom != b.black) " (orientation wrong)" else "") +

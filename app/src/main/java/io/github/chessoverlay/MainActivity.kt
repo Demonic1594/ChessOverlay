@@ -27,9 +27,9 @@ import io.github.chessoverlay.chess.Board
 import io.github.chessoverlay.engine.EngineCheck
 import io.github.chessoverlay.engine.EngineInfo
 import io.github.chessoverlay.engine.EngineRegistry
-import io.github.chessoverlay.engine.PvLine
 import io.github.chessoverlay.overlay.BoardStyle
 import io.github.chessoverlay.overlay.OverlayService
+import io.github.chessoverlay.ui.PositionCard
 import io.github.chessoverlay.ui.PreviewBoardView
 import io.github.chessoverlay.ui.Rows
 import io.github.chessoverlay.vision.ModelStore
@@ -51,6 +51,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var startHint: TextView
     private lateinit var progress: LinearProgressIndicator
     private lateinit var preview: PreviewBoardView
+    private lateinit var positions: PositionCard
     private var engines: List<EngineInfo> = emptyList()
     private var downloading = false
     private val main = Handler(Looper.getMainLooper())
@@ -59,7 +60,7 @@ class MainActivity : AppCompatActivity() {
     private val live = object : Runnable {
         override fun run() {
             // Only when the overlay saw a new position: rebuilding the card every time made it flicker and lose taps.
-            if (OverlayService.lastPosition !== lastShown) showLast()
+            positions.followOverlay()
             main.postDelayed(this, LIVE_MS)
         }
     }
@@ -84,7 +85,7 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<View>(R.id.engineAdd).setOnClickListener { addEngineFile() }
         preview = findViewById(R.id.preview)
-        buildPositionActions()
+        positions = PositionCard(this, preview)
         buildSettings()
         buildTools()
         findViewById<TextView>(R.id.version).text = "ChessOverlay " +
@@ -139,107 +140,13 @@ class MainActivity : AppCompatActivity() {
             EngineInfo.Kind.IMPORTED -> "Added from a file"
             null -> "Tap + to add an engine file"
         }
-        showPosition()
+        positions.show()
     }
 
-    // ---- the last position -------------------------------------------------
-
-    /** What can be done with the last position and with the kept ones. */
-    private fun buildPositionActions() {
-        val actions = Rows(findViewById(R.id.positionActions))
-        actions.buttons(listOf("Copy FEN", "Copy line")) { i ->
-            val p = OverlayService.lastPosition ?: return@buttons
-            if (i == 0) copy("ChessOverlay position", p.fen) else copy("ChessOverlay line", p.text())
-        }
-        actions.buttons(listOf("Analyse online", "Keep")) { i ->
-            val p = OverlayService.lastPosition ?: return@buttons
-            if (i == 0) analyseOnTheWeb(p.fen) else { KeptPositions.add(this, p); toast("Kept"); showPosition() }
-        }
-    }
-
-    /** The position shown by showLast(). */
-    private var lastShown: Any? = null
-
-    /** The position the overlay saw last (its board with the engine's arrows, its FEN and line), and the kept ones. */
-    private fun showPosition() {
-        showLast()
-        showKept()
-    }
-
-    private fun showLast() {
-        val p = OverlayService.lastPosition
-        lastShown = p
-        val board = p?.let { try { Board.fromPlacement(it.fen.split(' ')[0]) } catch (_: Exception) { null } }
-        val has = p != null && board != null
-        findViewById<View>(R.id.positionActions).visibility = if (has) View.VISIBLE else View.GONE
-        val fen = findViewById<TextView>(R.id.positionFen)
-        fen.visibility = if (has) View.VISIBLE else View.GONE
-        val title = findViewById<TextView>(R.id.positionTitle)
-        val detail = findViewById<TextView>(R.id.positionDetail)
-        if (p != null && board != null) {
-            title.text = p.side + if (p.expected) " (expected)" else ""
-            detail.text = listOfNotNull(p.moveNumber?.let { "move $it" }, p.score?.let { "eval $it" },
-                if (p.depth > 0) "depth ${p.depth}" else null).joinToString(" · ") + (if (p.line.isNotEmpty()) "\n${p.line}" else "")
-            fen.text = p.fen
-            preview.shown = PreviewBoardView.Shown(board, p.whiteToMove, p.pv.takeIf { it.isNotEmpty() }?.let { PvLine(1, p.depth,
-                p.whiteCp?.let { c -> if (p.whiteToMove) c else -c }, p.whiteMate?.let { m -> if (p.whiteToMove) m else -m }, it) })
-        } else {
-            title.text = "No position yet"
-            detail.text = "The overlay's last position appears here."
-            preview.shown = null
-        }
-    }
-
-    /** The positions kept: one row each, and what to do with all of them. */
-    private fun showKept() {
-        val kept = KeptPositions.all(this)
-        val list = findViewById<android.widget.LinearLayout>(R.id.kept)
-        list.removeAllViews()
-        list.visibility = if (kept.isEmpty()) View.GONE else View.VISIBLE
-        if (kept.isEmpty()) return
-        val rows = Rows(list)
-        rows.subhead("Kept (${kept.size})")
-        for (k in kept) rows.action(R.drawable.ic_grid, k.note, k.fen) { askAboutKept(k) }
-        rows.buttons(listOf("Share all", "Clear")) { i ->
-            if (i == 0) startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, KeptPositions.text(kept))
-            }, "Share the kept positions"))
-            else MaterialAlertDialogBuilder(this)
-                .setMessage("Remove the ${kept.size} kept position${if (kept.size == 1) "" else "s"}?")
-                .setNegativeButton("Keep them", null)
-                .setPositiveButton("Remove") { _, _ -> KeptPositions.clear(this); showPosition() }
-                .show()
-        }
-    }
-
-    private fun askAboutKept(k: KeptPositions.Kept) {
-        MaterialAlertDialogBuilder(this)
-            .setTitle(k.note)
-            .setItems(arrayOf("Copy the FEN", "Analyse online (lichess.org)", "Remove")) { _, which ->
-                when (which) {
-                    0 -> copy("ChessOverlay position", k.fen)
-                    1 -> analyseOnTheWeb(k.fen)
-                    else -> { KeptPositions.remove(this, k.fen); showPosition() }
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun copy(label: String, text: String) {
-        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(label, text))
-        toast("Copied")
-    }
-
-    /** lichess.org's analysis of a position: its address is the FEN with spaces as underscores. */
-    private fun analyseOnTheWeb(fen: String) {
-        try {
-            startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW, Uri.parse("https://lichess.org/analysis/" + fen.replace(' ', '_'))), "Analyse the position"))
-        } catch (e: Exception) {
-            DebugLog.e("Positions", "no app to open an address", e)
-            toast("No browser found")
-        }
+    /** The debug log, then what the game tracker decided read by read (the clearest account of a freeze). */
+    private fun fullLog(): String {
+        val t = io.github.chessoverlay.vision.TrackerLog.dump()
+        return DebugLog.dump() + if (t.isEmpty()) "" else "\n\n--- What the tracker made of each read (newest last) ---\n$t"
     }
 
     // ---- settings ----------------------------------------------------------
@@ -283,7 +190,7 @@ class MainActivity : AppCompatActivity() {
         r.action(R.drawable.ic_engine, "Test the engine", null) { testEngine() }
         r.action(R.drawable.ic_grid, "Test recognition", null) { testRecognition() }
         r.action(R.drawable.ic_copy, "Copy the debug log", null) {
-            getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("ChessOverlay log", DebugLog.dump()))
+            getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("ChessOverlay log", fullLog()))
             toast("Debug log copied")
         }
         r.action(R.drawable.ic_share, "Share the last misread screen", null) { shareMisread() }
@@ -362,7 +269,7 @@ class MainActivity : AppCompatActivity() {
                     .setPositiveButton("OK", null)
                     .setNeutralButton("Copy the debug log") { _, _ ->
                         getSystemService(ClipboardManager::class.java)
-                            .setPrimaryClip(ClipData.newPlainText("ChessOverlay log", DebugLog.dump()))
+                            .setPrimaryClip(ClipData.newPlainText("ChessOverlay log", fullLog()))
                         toast("Debug log copied")
                     }
                     .show()

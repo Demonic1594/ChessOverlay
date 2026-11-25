@@ -65,6 +65,7 @@ The same values can be given as the environment variables `SIGNING_STORE_FILE`, 
 | `ENGINE` | An engine executable | The engine supervisor against a real engine (`EngineHostTest`); a real analysis (`UciTest`); a board that moved, found again (`RelocateTest`, with `MODELS`) |
 | `QMODELS` | The folder with the bundled int8 models | The int8 model against the original on every test image, square by square where the original is sure (`QuantizedModelTest`, with `MODELS`); the benchmark on the int8 model |
 | `BENCH` | The folder with the benchmark boards | The benchmark (`BenchTest`, with `MODELS`) |
+| `SHOTS` | A folder of real screenshots (PNG), kept outside the repository | Each read as the app reads it, printed; one with a `name.txt` beside it (`<placement> <white\|black> [<last move>]`) must be read that way (`ShotsTest`, with `MODELS`) |
 
 ### The app's tests on a device
 
@@ -116,7 +117,7 @@ For pushes to `main` and runs started by hand, the APK is signed with the projec
 
 ## Benchmark
 
-`tools/bench/gen.py` renders 200 boards from seeded random games, in lichess's board themes and piece sets, with the images lichess itself uses. The first twenty are the board alone in several sizes; the others are phone screens with bars above and below the board. Some are turned for Black and half have coordinates. The same boards come out every time, so nothing of it needs room in the repository. Chrome is needed for the SVG pieces.
+`tools/bench/gen.py` renders 200 boards from seeded random games, in lichess's board themes and piece sets, with the images lichess itself uses. The first twenty are the board alone in several sizes; the others are phone screens with bars above and below the board. Some are turned for Black and half have coordinates. With `--hard N` (CI uses 40) it adds the cases that went wrong on phones: boards from edge to edge of the screen, flat two-colour boards as other sites draw them (plain colours, no site's images), and the last move highlighted. The same boards come out every time, so nothing of it needs room in the repository. Chrome is needed for the SVG pieces.
 
 `BenchTest` reads them and writes `report.txt`: how many boards are read right, by theme, piece set, orientation, coordinates and kind of picture; how far the corners are off; how long a read takes; and where the corners of every wrong board were.
 
@@ -125,7 +126,7 @@ To run it locally:
 ```sh
 python3 -m venv /tmp/bench
 /tmp/bench/bin/pip install "chess==1.11.2"
-/tmp/bench/bin/python tools/bench/gen.py build/bench --boards 200
+/tmp/bench/bin/python tools/bench/gen.py build/bench --boards 200 --hard 40
 BENCH="$PWD/build/bench" MODELS="$PWD/models" ./gradlew testDebugUnitTest --tests '*BenchTest*'
 ```
 
@@ -160,7 +161,15 @@ CI bundles the Android builds of the Smotherfish release named as `ENGINE_RELEAS
 
 ## Versions and releases
 
-`versionName` and `versionCode` are in `app/build.gradle.kts`. There are no GitHub Releases yet: APKs are the `chessoverlay-apk` artifact of a workflow run.
+`versionCode` is the workflow's run number, so every CI build installs over the one before; `versionName` is the tag for a release and `0.1.0+<run>` otherwise (`app/build.gradle.kts`).
+
+To publish a release, tag a commit on main and push the tag:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+The workflow builds and tests it as for main (signed with the project key), and once `apk`, `engine-arm64` and `device` have passed, the `release` job publishes a GitHub Release named after the tag: `ChessOverlay-v0.2.0.apk`, its `.sha256`, and notes listing the bundled engine and the pull requests merged since the last release. Other builds are the `chessoverlay-apk` artifact of their run.
 
 ## Documentation images
 

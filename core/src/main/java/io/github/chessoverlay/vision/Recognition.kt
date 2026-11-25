@@ -17,6 +17,27 @@ data class Recognition(
 )
 
 /**
+ * How sure the model is of the whole board: the mean, over the 64 squares,
+ * of the probability of what each was read as (the least certain square's
+ * alone when the probabilities are not there). A board read at slightly
+ * wrong corners has many squares cut across, and this drops with them.
+ */
+fun Recognition.meanConfidence(): Float {
+    val p = drawnProbs ?: return confidence
+    if (p.isEmpty()) return confidence
+    var sum = 0.0
+    for (sq in p) sum += sq.maxOrNull() ?: 0f
+    return (sum / p.size).toFloat()
+}
+
+/** How far apart two sets of corners are, as a share of the board's side: the largest corner distance. */
+fun cornerShift(a: List<FloatArray>, b: List<FloatArray>): Float {
+    if (a.size != 4 || b.size != 4) return 1f
+    val side = maxOf(a.maxOf { it[0] } - a.minOf { it[0] }, a.maxOf { it[1] } - a.minOf { it[1] }, 1f)
+    return (0 until 4).maxOf { i -> kotlin.math.hypot(a[i][0] - b[i][0], a[i][1] - b[i][1]) } / side
+}
+
+/**
  * Whether located corners can be a chess board on a `w` x `h` screen: a
  * near-square (sides within 12% of each other) at least 15% of the
  * screen's shorter side. Anything else is a false find, not a board to read.
