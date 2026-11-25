@@ -109,10 +109,28 @@ class Recognizer(boardModel: File, locatorModel: File, val mode: RecognizerMode 
         val located = locate(img)
         val find = (System.nanoTime() - t0) / 1_000_000
         // The locator's corners are a little off; the board's own edges say where it is.
-        val r = read(img, if (sharpen) BoardEdges.refine(img, located) else located, legality)
-        lastTiming = "find ${find} ms, $lastTiming"
+        val edges = if (sharpen) BoardEdges.refine(img, located) else located
+        var r = read(img, edges, legality)
+        var timing = lastTiming
+        // Where the two disagree, the board is read at both and the surer reading kept (as fenshot does): edges
+        // can be misled by a site's frame or a strip of the page, and corners a fifth of a square off cut every
+        // square and lower the model's certainty across the board.
+        lastAlignment = null
+        if (edges !== located && cornerShift(edges, located) > ALIGN_SHIFT && r.meanConfidence() < SURE) {
+            val alt = read(img, located, legality)
+            val a = r.meanConfidence(); val b = alt.meanConfidence()
+            lastAlignment = String.format(java.util.Locale.US, "edges %.3f, locator %.3f: %s", a, b,
+                if (b > a + ALIGN_MARGIN) "locator" else "edges")
+            if (b > a + ALIGN_MARGIN) r = alt
+            timing += "; second alignment: $lastTiming"
+        }
+        lastTiming = "find ${find} ms, $timing"
         return r
     }
+
+    /** When the last located read compared two alignments: their certainty and the one kept (for the log). */
+    @Volatile var lastAlignment: String? = null
+        private set
 
     /** The board at `corners` read: its image prepared, the model run, the reading taken from the model's output. */
     private fun read(img: Img, corners: List<FloatArray>, legality: Boolean): Recognition {
@@ -165,6 +183,13 @@ class Recognizer(boardModel: File, locatorModel: File, val mode: RecognizerMode 
 
         fun boxToCorners(x0: Float, y0: Float, x1: Float, y1: Float) =
             listOf(floatArrayOf(x0, y0), floatArrayOf(x1, y0), floatArrayOf(x1, y1), floatArrayOf(x0, y1))
+
+        /** Edges and locator further apart than this (of the side): both alignments are read. */
+        const val ALIGN_SHIFT = 0.02f
+        /** A reading this sure of the whole board needs no second alignment. */
+        const val SURE = 0.995f
+        /** The locator's alignment must be this much surer to be kept over the edges'. */
+        const val ALIGN_MARGIN = 0.005f
 
         fun cornersToBox(c: List<FloatArray>) =
             floatArrayOf(c.minOf { it[0] }, c.minOf { it[1] }, c.maxOf { it[0] }, c.maxOf { it[1] })

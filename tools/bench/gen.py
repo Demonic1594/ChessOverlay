@@ -6,7 +6,13 @@ itself uses, fetched from its repository) with Chrome, which is needed for
 the SVG pieces: as the board alone, or as a phone screen with the board in
 it. `expected.json` says what each image shows.
 
-    python3 tools/bench/gen.py OUTDIR [--boards 200] [--chrome google-chrome]
+    python3 tools/bench/gen.py OUTDIR [--boards 200] [--hard 40] [--chrome google-chrome]
+
+`--hard` adds boards after those (their own seed, so the first ones stay the
+same): the cases that went wrong on phones. A board from edge to edge of the
+screen, as phone apps show it; flat two-colour boards as other sites draw
+them (plain colours, no site's images); and the last move highlighted on
+two squares.
 
 The build workflow runs this before the unit tests and points BenchTest at
 the directory, so that the benchmark needs no room in the repository.
@@ -41,6 +47,14 @@ THEMES = [
 PIECE_SETS = ["cburnett", "merida", "alpha", "chessnut", "pirouetti", "maestro", "fresca", "gioco", "companion", "staunty"]
 PIECES = ["wK", "wQ", "wR", "wB", "wN", "wP", "bK", "bQ", "bR", "bB", "bN", "bP"]
 FILES = "abcdefgh"
+# Flat two-colour boards as other sites draw them: a name, the light and the dark square, the last move's tint.
+FLAT = [
+    ("flat-green", "#eeeed2", "#769656", "rgba(255,255,51,0.5)"),
+    ("flat-brown", "#f0d9b5", "#b58863", "rgba(155,199,0,0.41)"),
+    ("flat-blue", "#dee3e6", "#8ca2ad", "rgba(155,199,0,0.41)"),
+    ("flat-grey", "#e8e8e8", "#a0a0a0", "rgba(255,255,51,0.5)"),
+    ("flat-dark", "#c8c8c8", "#4a4a4a", "rgba(20,85,30,0.5)"),
+]
 # What is around a board on a phone: lichess's dark app with bars above and below, or a light app.
 DARK, LIGHT = "#262421", "#ebebeb"
 OPENINGS = [
@@ -68,6 +82,8 @@ class Board:
     coords: bool
     phone: bool         # a phone screen with the board in it (else the board alone)
     size: list          # the picture's width and height
+    edge: bool = False  # the board from edge to edge of the screen
+    highlight: list = dataclasses.field(default_factory=list)   # squares tinted as the last move, e.g. ["e2", "e4"]
 
 
 def positions(count):
@@ -108,14 +124,32 @@ def page(b: Board, theme, piece_files, background):
     sq = side / 8
     font = max(9, round(side / 38))
     black = b.bottom == "black"
-    _, image, on_dark, on_light = theme
+    flat = next((f for f in FLAT if f[0] == b.theme), None)
+    if flat:
+        _, light, dark, tint = flat
+        on_dark, on_light, ground = light, dark, f"background:{dark}"
+    else:
+        _, image, on_dark, on_light = theme
+        tint = "rgba(155,199,0,0.41)"
+        ground = f'background:url("{image.as_uri()}");background-size:100% 100%'
     out = [f'<!doctype html><meta charset="utf-8"><style>html,body{{margin:0;background:{background};overflow:hidden}}'
            f'body{{width:{b.size[0]}px;height:{b.size[1]}px;position:relative;font-family:Roboto,Arial,sans-serif}}'
-           f'#board{{position:absolute;left:{x0}px;top:{y0}px;width:{side}px;height:{side}px;'
-           f'background:url("{image.as_uri()}");background-size:100% 100%}}'
-           f'#board img{{position:absolute;width:{sq:.3f}px;height:{sq:.3f}px}}'
+           f'#board{{position:absolute;left:{x0}px;top:{y0}px;width:{side}px;height:{side}px;{ground}}}'
+           f'#board img,#board .s{{position:absolute;width:{sq:.3f}px;height:{sq:.3f}px}}'
            f'.c{{position:absolute;font-weight:bold;font-size:{font}px;line-height:1}}</style>',
            '<div id="board">']
+
+    def at(name):
+        file, rank = FILES.index(name[0]), int(name[1]) - 1
+        return (7 - file, rank) if black else (file, 7 - rank)
+    if flat:
+        for row in range(8):
+            for col in range(8):
+                if (row + col) % 2 == 0:
+                    out.append(f'<div class="s" style="left:{col * sq:.3f}px;top:{row * sq:.3f}px;background:{light}"></div>')
+    for name in b.highlight:
+        col, row = at(name)
+        out.append(f'<div class="s" style="left:{col * sq:.3f}px;top:{row * sq:.3f}px;background:{tint}"></div>')
     for square, piece in board.piece_map().items():
         file, rank = chess.square_file(square), chess.square_rank(square)
         col, row = (7 - file, rank) if black else (file, 7 - rank)
@@ -168,21 +202,53 @@ def boards(count):
     return out
 
 
+def hard_boards(count, first):
+    """The boards that went wrong on phones (see the module's text), numbered from `first`."""
+    rng = random.Random(20261125)
+    out = []
+    for i, fen in enumerate(positions(first + count)[first:]):
+        n = first + i
+        bottom = "black" if rng.random() < 0.4 else "white"
+        theme = rng.choice(FLAT)[0] if rng.random() < 0.6 else rng.choice(THEMES)[0]
+        w, h = rng.choice([(1080, 2340), (1440, 3120), (1080, 1920)])
+        if rng.random() < 0.6:
+            # Edge to edge, as phone apps show a board: its sides are the screen's.
+            box, edge = [0, rng.randint(300, h - w - 400), w, 0], True
+        else:
+            side = rng.randint(int(w * 0.8), w - 8)
+            box, edge = [rng.randint(0, w - side), rng.randint(200, h - side - 300), side, 0], False
+            box[2] = box[0] + side
+        box[3] = box[1] + (box[2] - box[0])
+        # The last move: a piece of the side that is not to move, and the square it came from (empty now).
+        board = chess.Board(fen + " w - - 0 1")
+        pieces = list(board.piece_map().items())
+        empty = [s for s in chess.SQUARES if board.piece_at(s) is None]
+        highlight = []
+        if pieces and empty and rng.random() < 0.8:
+            to = rng.choice(pieces)[0]
+            highlight = [chess.square_name(rng.choice(empty)), chess.square_name(to)]
+        out.append(Board(f"b{n:03d}.png", fen, bottom, box, theme, rng.choice(PIECE_SETS), rng.random() < 0.5, True,
+                         [w, h], edge, highlight))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("out", type=pathlib.Path)
     ap.add_argument("--boards", type=int, default=200)
+    ap.add_argument("--hard", type=int, default=0, help="boards from edge to edge, flat boards, highlights (after the others)")
     ap.add_argument("--chrome", default="google-chrome")
     ap.add_argument("--html-only", action="store_true", help="write the pages and expected.json, render nothing")
     args = ap.parse_args()
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     themes, sets = assets(out / "assets")
-    items = boards(args.boards)
+    items = boards(args.boards) + hard_boards(args.hard, args.boards)
     rng = random.Random(7)
     for b in items:
         background = DARK if (not b.phone or rng.random() < 0.7) else LIGHT
-        (out / b.file.replace(".png", ".html")).write_text(page(b, next(t for t in themes if t[0] == b.theme), sets[b.pieces], background))
+        theme = next((t for t in themes if t[0] == b.theme), None)
+        (out / b.file.replace(".png", ".html")).write_text(page(b, theme, sets[b.pieces], background))
     (out / "expected.json").write_text(json.dumps([dataclasses.asdict(b) for b in items], indent=1))
     if args.html_only:
         print("wrote", len(items), "pages to", out)

@@ -353,4 +353,46 @@ class TrackerTest {
         val r = t.accept(render(b), rec(b), true) as BoardTracker.Result.Position
         assertEquals(false, r.whiteToMove)
     }
+
+    /**
+     * A position no move explains, far from the last one: read surely it counts at once (a new position opened);
+     * read with a square in doubt it must be read the same way again, and the last analysis stays meanwhile.
+     */
+    @Test fun anUnsureJumpIsReadTwice() {
+        val game = after(start, "e2e4", "e7e5")
+        val elsewhere = Board.fromPlacement("r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N1PN2/PP3PPP/R2QKB1R")
+        for (sure in listOf(true, false)) {
+            val t = BoardTracker()
+            t.accept(render(game), rec(game), null, strict = true)
+            val r = rec(elsewhere).copy(confidence = if (sure) 0.97f else 0.6f)
+            val first = t.accept(render(elsewhere), r, null, strict = true)
+            if (sure) {
+                assertTrue("sure: at once ($first)", first is BoardTracker.Result.Position)
+            } else {
+                assertTrue("unsure: held ($first)", first is BoardTracker.Result.Invalid)
+                assertEquals("the game stays", game.placement(), t.board!!.placement())
+                val second = t.accept(render(elsewhere), r, null, strict = true)
+                assertTrue("the same again: it counts ($second)", second is BoardTracker.Result.Position)
+            }
+            assertEquals(elsewhere.placement(), t.board!!.placement())
+        }
+    }
+
+    /** Each decision is written to the tracker's log with the position it led to. */
+    @Test fun decisionsAreLogged() {
+        io.github.chessoverlay.vision.TrackerLog.clear()
+        val t = BoardTracker()
+        val s0 = Board.fromPlacement(start)
+        val e4 = after(start, "e2e4")
+        t.accept(render(s0), rec(s0), null, strict = true)
+        t.accept(render(e4), rec(e4), null, strict = true)
+        t.accept(render(e4), rec(e4), null, strict = true)
+        t.reset(keepGame = true)
+        val log = io.github.chessoverlay.vision.TrackerLog.dump()
+        val lines = log.lines()
+        assertTrue(log, lines[0].contains("first position") && lines[0].contains(s0.placement()))
+        assertTrue(log, lines[1].contains("move e2e4, Black to move") && lines[1].contains(e4.placement() + " b "))
+        assertTrue(log, lines[2].contains(" same | "))
+        assertTrue(log, lines[3].contains("board lost; the game is kept"))
+    }
 }

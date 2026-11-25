@@ -88,7 +88,7 @@ jobs:
         run: |
           python3 -m venv /tmp/bench
           /tmp/bench/bin/pip install --quiet "chess==1.11.2"
-          /tmp/bench/bin/python tools/bench/gen.py "$GITHUB_WORKSPACE/build/bench" --boards 200
+          /tmp/bench/bin/python tools/bench/gen.py "$GITHUB_WORKSPACE/build/bench" --boards 200 --hard 40
 
       - name: Unit tests
         run: |

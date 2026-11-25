@@ -238,7 +238,8 @@ class Analyst(
         DebugLog.i(TAG, "read ${if (located) "after locating" else "at known corners"} ($changed squares changed) in $ms ms " +
             "[${recognizer.lastTiming}]: " +
             "${rec.placement} ${if (rec.blackAtBottom) "black" else "white"} at bottom, sure ${(rec.confidence * 100).toInt()}%, " +
-            "corners ${rec.corners.joinToString(" ") { "${it[0].toInt()},${it[1].toInt()}" }}")
+            "corners ${rec.corners.joinToString(" ") { "${it[0].toInt()},${it[1].toInt()}" }}" +
+            (if (located) recognizer.lastAlignment?.let { "; alignments: $it" } ?: "" else ""))
         if (rec.confidence < minConfidence && !located) {
             rec = try { recognizer.recognise(img) } catch (e: Exception) { rec }
             located = true

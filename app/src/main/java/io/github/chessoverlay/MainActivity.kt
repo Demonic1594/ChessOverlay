@@ -227,6 +227,12 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    /** The debug log, then what the game tracker decided read by read (the clearest account of a freeze). */
+    private fun fullLog(): String {
+        val t = io.github.chessoverlay.vision.TrackerLog.dump()
+        return DebugLog.dump() + if (t.isEmpty()) "" else "\n\n--- What the tracker made of each read (newest last) ---\n$t"
+    }
+
     private fun copy(label: String, text: String) {
         getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(label, text))
         toast("Copied")
@@ -283,7 +289,7 @@ class MainActivity : AppCompatActivity() {
         r.action(R.drawable.ic_engine, "Test the engine", null) { testEngine() }
         r.action(R.drawable.ic_grid, "Test recognition", null) { testRecognition() }
         r.action(R.drawable.ic_copy, "Copy the debug log", null) {
-            getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("ChessOverlay log", DebugLog.dump()))
+            getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("ChessOverlay log", fullLog()))
             toast("Debug log copied")
         }
         r.action(R.drawable.ic_share, "Share the last misread screen", null) { shareMisread() }
@@ -362,7 +368,7 @@ class MainActivity : AppCompatActivity() {
                     .setPositiveButton("OK", null)
                     .setNeutralButton("Copy the debug log") { _, _ ->
                         getSystemService(ClipboardManager::class.java)
-                            .setPrimaryClip(ClipData.newPlainText("ChessOverlay log", DebugLog.dump()))
+                            .setPrimaryClip(ClipData.newPlainText("ChessOverlay log", fullLog()))
                         toast("Debug log copied")
                     }
                     .show()
