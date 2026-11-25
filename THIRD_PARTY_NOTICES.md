@@ -1,7 +1,7 @@
 # Third-party notices
 
-The app's own code has no licence file yet (see the README, section
-*Licence*). This page names what the APK contains that is not the app's own
+The app's own code is Copyright (C) 2026 Demonic1594, under the GNU General
+Public License, version 3 (see [LICENSE](LICENSE)). This page names what the APK contains that is not the app's own
 code, and the licence of each.
 
 | Component | Used for | Licence |

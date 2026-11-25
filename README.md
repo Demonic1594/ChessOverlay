@@ -10,7 +10,7 @@
   <a href="https://github.com/Demonic1594/ChessOverlay/actions/workflows/build.yml"><img alt="Build status" src="https://github.com/Demonic1594/ChessOverlay/actions/workflows/build.yml/badge.svg"></a>
   <img alt="Android 8.0 or later" src="https://img.shields.io/badge/Android-8.0%2B-3ddc84">
   <img alt="arm64-v8a" src="https://img.shields.io/badge/CPU-arm64--v8a-blue">
-  <img alt="No licence yet" src="https://img.shields.io/badge/licence-none%20yet-lightgrey">
+  <a href="LICENSE"><img alt="Licence: GPL-3.0" src="https://img.shields.io/badge/licence-GPL--3.0-blue"></a>
 </p>
 
 <p align="center">
@@ -257,9 +257,11 @@ Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) says ho
 
 ## Licence
 
-The app's own code has no licence yet. Until one is chosen, the default applies: the code may be read and forked, but not used, modified or distributed.
+Copyright (C) 2026 Demonic1594.
 
-The APK bundles Smotherfish, which is under the GNU General Public License, version 3. Distributing the APK means providing that engine's source.
+ChessOverlay is free software under the [GNU General Public License, version 3](LICENSE). You may use, study, change and share it. Anyone who shares it, changed or not, must keep the copyright and credit notices, ship it under the same licence, and give everyone who receives it the full source code. It cannot be turned into closed-source software.
+
+Smotherfish, the built-in engine, is also by Demonic1594 and is under GPL-3.0 too, as a derivative of Stockfish (copyright the Stockfish developers). The other parts of the APK keep their own licences: see [Third-party software](#third-party-software).
 
 ## Third-party software
 

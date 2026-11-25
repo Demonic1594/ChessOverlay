@@ -15,3 +15,7 @@ Issues and pull requests are welcome. This page says how to report a problem and
 - Keep `core` free of Android: what can be tested on the JVM goes there.
 - A change to the recognition says what the benchmark did before and after.
 - CI builds the APK and runs the unit tests, the benchmark, the emulator tests and the engine on arm64 hardware. It should pass before a change is merged.
+
+## Licence
+
+ChessOverlay is under the GNU General Public License, version 3 (see [LICENSE](LICENSE)). By sending a pull request you agree that your contribution is shared under the same licence, and the copyright and credit notices stay as they are.
