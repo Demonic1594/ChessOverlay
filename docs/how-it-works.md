@@ -60,6 +60,7 @@ The code is split so that everything that can be tested on an ordinary JVM is:
 2. For each side, 64 lines across it are followed from outside the located edge inwards, each to the first place where the picture differs from the page and goes on differing.
 3. The edge is where the largest group of lines agree. Lines whose first pixel already differs say the edge is further off than was looked for, and do not count.
 4. The board is square: a side that could not be found lies a side's length from its opposite when that one was found; when neither of two opposite sides has page beyond it (the board spans the width of a phone), both are taken about where the locator had them.
+5. A board that reaches both sides of the picture (its first and last pixel columns show squares, not one colour: a phone in portrait) is exactly as wide as the picture. A top or bottom edge found a different distance apart was fooled by something next to the board, such as chess.com's dark strip between the board and the bar above it, and the one further from the locator's edge gives way to the other one plus the picture's width.
 
 When the located box is not square, the locator missed part of the board, and the edges are looked for further out (20 % of a side instead of 7 %). Only a board that stands square in the picture is refined; a tilted one keeps the locator's corners, and what is found must still be about the board the locator gave, or the locator's corners stand.
 

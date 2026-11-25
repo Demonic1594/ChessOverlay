@@ -25,6 +25,13 @@ import kotlin.math.min
  * it when neither of two opposite sides has page; where nothing shows it,
  * it stays where the locator put it. Only a board that stands square in
  * the picture is sharpened; a tilted one keeps the locator's corners.
+ *
+ * A board that reaches both sides of the picture (a phone in portrait,
+ * where boards are drawn edge to edge) is exactly as wide as the picture:
+ * that is its side. Then a top or bottom edge found a different distance
+ * apart was fooled by something next to the board (chess.com's dark strip
+ * between the board and the bar above it reads as board), and the one
+ * further from where the locator put its edge gives way.
  */
 object BoardEdges {
     /** How far inside the located edge the true one may be looked for (a fraction of the board's side). */
@@ -51,6 +58,10 @@ object BoardEdges {
     private const val EVEN = 16
     /** The lines that agree on an edge must be at least this share of those that found one. */
     private const val AGREE = 0.35f
+    /** A located edge this close to the picture's side (a share of the board's side) reaches it. */
+    private const val SPANS = 0.02f
+    /** Edges a side's length apart give or take this much (a share of the side) agree with it. */
+    private const val TOLERANCE = 0.01f
 
     /** One side of the board: `at` is where the locator put the edge, `from` and `to` its extent along the board,
      *  and the page around the board lies at greater coordinates than the edge when `outward` is +1 (the right
@@ -97,10 +108,22 @@ object BoardEdges {
             val page = r.page ?: common ?: return null
             return edge(img, sides[i], side, page, r.out)
         }
-        val left = find(0)
-        val right = find(1)
-        val top = find(2)
-        val bottom = find(3)
+        var left = find(0)
+        var right = find(1)
+        var top = find(2)
+        var bottom = find(3)
+        // Edge to edge across the picture: the picture's width is the board's side.
+        val touch = SPANS * side
+        if (left == null && right == null && x0 <= touch && x1 >= img.w - 1 - touch &&
+            showsSquares(img, 0, y0, y1) && showsSquares(img, img.w - 1, y0, y1)) {
+            left = 0f
+            right = img.w.toFloat()
+            val width = img.w.toFloat()
+            val tol = TOLERANCE * side
+            if (top != null && bottom != null && abs(bottom - top - width) > tol) {
+                if (abs(top - y0) > abs(bottom - y1)) top = null else bottom = null
+            }
+        }
         if (left == null && right == null && top == null && bottom == null) return corners   // the picture showed none
         val maxMove = (out + INWARD + 0.01f) * side
         // The board is square: a side's length from a pair of sides that were found.
@@ -129,6 +152,24 @@ object BoardEdges {
         if (w <= 0f || h <= 0f) return corners
         if (abs(w - (x1 - x0)) > maxMove || abs(h - (y1 - y0)) > maxMove || abs(w - h) > 0.12f * max(w, h)) return corners
         return listOf(floatArrayOf(nx0, ny0), floatArrayOf(nx1, ny0), floatArrayOf(nx1, ny1), floatArrayOf(nx0, ny1))
+    }
+
+    /** Whether the picture's column `x` shows the board's squares from `y0` to `y1` (light and dark in turn), not one colour. */
+    private fun showsSquares(img: Img, x: Int, y0: Float, y1: Float): Boolean {
+        val values = ArrayList<Int>()
+        val span = y1 - y0
+        var y = y0 + ENDS * span
+        while (y < y1 - ENDS * span) {
+            val yi = y.toInt()
+            if (yi in 0 until img.h) {
+                val c = img[x, yi]
+                values += ((c shr 16) and 0xff) + ((c shr 8) and 0xff) + (c and 0xff)
+            }
+            y += max(1f, span / 64f)
+        }
+        if (values.size < 16) return false
+        values.sort()
+        return values[values.size * 3 / 4] - values[values.size / 4] > 3 * EVEN
     }
 
     /**

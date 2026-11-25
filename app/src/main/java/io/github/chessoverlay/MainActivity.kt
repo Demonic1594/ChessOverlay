@@ -162,14 +162,15 @@ class MainActivity : AppCompatActivity() {
         val board = p?.let { try { Board.fromPlacement(it.fen.split(' ')[0]) } catch (_: Exception) { null } }
         val has = p != null && board != null
         findViewById<View>(R.id.positionActions).visibility = if (has) View.VISIBLE else View.GONE
-        findViewById<TextView>(R.id.positionFen).visibility = if (has) View.VISIBLE else View.GONE
+        val fen = findViewById<TextView>(R.id.positionFen)
+        fen.visibility = if (has) View.VISIBLE else View.GONE
         val title = findViewById<TextView>(R.id.positionTitle)
         val detail = findViewById<TextView>(R.id.positionDetail)
         if (p != null && board != null) {
             title.text = p.side + if (p.expected) " (expected)" else ""
             detail.text = listOfNotNull(p.moveNumber?.let { "move $it" }, p.score?.let { "eval $it" },
                 if (p.depth > 0) "depth ${p.depth}" else null).joinToString(" · ") + (if (p.line.isNotEmpty()) "\n${p.line}" else "")
-            findViewById<TextView>(R.id.positionFen).text = p.fen
+            fen.text = p.fen
             preview.shown = PreviewBoardView.Shown(board, p.whiteToMove, p.pv.takeIf { it.isNotEmpty() }?.let { PvLine(1, p.depth,
                 p.whiteCp?.let { c -> if (p.whiteToMove) c else -c }, p.whiteMate?.let { m -> if (p.whiteToMove) m else -m }, it) })
         } else {

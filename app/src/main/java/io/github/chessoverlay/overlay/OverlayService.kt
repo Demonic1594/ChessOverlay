@@ -565,7 +565,12 @@ class OverlayService : Service() {
                     if (s.latestTime > hiddenAt + 16 || waited >= HIDE_WAIT_MS) {
                         // The frame is in: the card may come back (the copying of the frame takes longer).
                         main.post { card?.visibility = View.VISIBLE }
-                        then(s.grab())
+                        val t0 = SystemClock.uptimeMillis()
+                        val img = s.grab()
+                        val copy = SystemClock.uptimeMillis() - t0
+                        // Only when it costs: a capture that is slow to come or to copy delays every read.
+                        if (waited + copy >= SLOW_CAPTURE_MS) DebugLog.i(TAG, "capture: frame after $waited ms, copied in $copy ms")
+                        then(img)
                     } else {
                         waited += 16
                         work.postDelayed(this, 16)
@@ -731,6 +736,7 @@ class OverlayService : Service() {
         private const val GRID_H = 36
         private const val BLIND_MS = 20_000L        // squares under our drawing: look this often
         private const val RETRY_MS = 500L           // after a misread: 0.5, 1, 2, 4, 8 s
+        private const val SLOW_CAPTURE_MS = 60L
         private const val HIDE_WAIT_MS = 250L
 
         fun start(ctx: Context, resultCode: Int, data: Intent) {

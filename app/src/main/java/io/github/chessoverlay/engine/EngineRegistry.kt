@@ -76,6 +76,8 @@ class EngineRegistry(private val ctx: Context) {
             val authority = ai.metaData?.getString("chess.provider.engine.authority") ?: continue
             try {
                 val res = pm.getResourcesForApplication(ai.applicationInfo)
+                // The Open Exchange protocol names the engine list's resource: it can only be looked up by name.
+                @Suppress("DiscouragedApi")
                 val id = res.getIdentifier("enginelist", "xml", ai.packageName)
                 if (id == 0) continue
                 for ((title, fileName, targets) in parseEngineList(res.getXml(id))) {

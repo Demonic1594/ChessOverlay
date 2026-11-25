@@ -65,8 +65,16 @@ class ScreenSource(
         old.close()
     }
 
-    /** The newest frame as an RGB image, or null if none has arrived yet. */
-    fun grab(): Img? = crop(0, 0, Int.MAX_VALUE, Int.MAX_VALUE)?.img
+    /**
+     * The newest frame as an RGB image, or null if none has arrived yet.
+     * The image is reused by the next grab (a full screen is about 18 MB,
+     * and a new one for every move kept the garbage collector busy in a fast
+     * game): use it before grabbing again, and keep no reference to it.
+     */
+    fun grab(): Img? = crop(0, 0, Int.MAX_VALUE, Int.MAX_VALUE, reuse = true)?.img
+
+    /** The image grab() fills again. */
+    private var buffer: Img? = null
 
     /**
      * RGB of the newest frame at the given screen points (-1 off screen), or
@@ -92,7 +100,7 @@ class ScreenSource(
     class Crop(val img: Img, val ox: Int, val oy: Int)
 
     /** The rectangle (x0, y0)-(x1, y1) of the newest frame, clipped to the screen. */
-    fun crop(x0: Int, y0: Int, x1: Int, y1: Int): Crop? = synchronized(lock) {
+    fun crop(x0: Int, y0: Int, x1: Int, y1: Int, reuse: Boolean = false): Crop? = synchronized(lock) {
         val image = latest ?: return null
         val plane = image.planes[0]
         val buf = plane.buffer
@@ -101,7 +109,7 @@ class ScreenSource(
         val w = cx1 - cx0; val h = cy1 - cy0
         if (w == 0 || h == 0) return null
         val ps = plane.pixelStride; val rs = plane.rowStride
-        val out = Img(w, h)
+        val out = buffer?.takeIf { reuse && it.w == w && it.h == h } ?: Img(w, h).also { if (reuse) buffer = it }
         val row = ByteArray(w * ps)
         for (y in 0 until h) {
             buf.position((cy0 + y) * rs + cx0 * ps)
