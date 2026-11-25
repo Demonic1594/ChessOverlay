@@ -30,6 +30,15 @@ fun Recognition.meanConfidence(): Float {
     return (sum / p.size).toFloat()
 }
 
+/**
+ * How many squares the model is less than `threshold` sure of (all 64 when
+ * the probabilities are not there and the least sure square is below it).
+ */
+fun Recognition.unsureSquares(threshold: Float): Int {
+    val p = drawnProbs ?: return if (confidence < threshold) 64 else 0
+    return p.count { (it.maxOrNull() ?: 0f) < threshold }
+}
+
 /** How far apart two sets of corners are, as a share of the board's side: the largest corner distance. */
 fun cornerShift(a: List<FloatArray>, b: List<FloatArray>): Float {
     if (a.size != 4 || b.size != 4) return 1f

@@ -118,12 +118,15 @@ class OverlayWindows(
         placedHeight = h
         val gap = (6 * density).toInt()
         val minY = (24 * density).toInt()
-        lp.y = when {
-            box[1] - gap - h >= minY -> box[1] - gap - h
-            box[3] + gap + h <= screenH -> box[3] + gap
-            else -> minY
+        val centredX = ((box[0] + box[2]) / 2 - lp.width / 2).coerceIn(0, maxOf(0, screenW - lp.width))
+        when {
+            box[1] - gap - h >= minY -> { lp.y = box[1] - gap - h; lp.x = centredX }
+            box[3] + gap + h <= screenH -> { lp.y = box[3] + gap; lp.x = centredX }
+            // A board as tall as the screen (landscape): beside it, on the side with room, not over its top ranks.
+            screenW - box[2] - gap >= lp.width -> { lp.x = box[2] + gap; lp.y = minY }
+            box[0] - gap >= lp.width -> { lp.x = box[0] - gap - lp.width; lp.y = minY }
+            else -> { lp.y = minY; lp.x = centredX }
         }
-        lp.x = ((box[0] + box[2]) / 2 - lp.width / 2).coerceIn(0, maxOf(0, screenW - lp.width))
         runCatching { wm.updateViewLayout(v, lp) }
         updateCardRect()
     }
@@ -162,6 +165,9 @@ class OverlayWindows(
             lp.x = (startX + dx).coerceIn(-lp.width / 2, screenW - lp.width / 2)
             lp.y = (startY + dy).coerceIn(0, maxOf(0, screenH - v.height / 2))
             runCatching { wm.updateViewLayout(v, lp) }
+            // Where the card is now, while it moves: what it covers is not read as a change of the board, and a
+            // capture hides it where it is. (A window moved does not lay out again, so this is set here.)
+            if (v.width > 0) cardRect = intArrayOf(lp.x, lp.y, lp.x + v.width, lp.y + v.height)
             if (done) {
                 moving = false
                 prefs.cardX = lp.x

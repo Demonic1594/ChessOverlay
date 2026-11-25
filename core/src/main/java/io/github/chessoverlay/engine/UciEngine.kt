@@ -54,6 +54,9 @@ class UciEngine(
         private set
     @Volatile var bestMoveLine: String? = null
         private set
+    /** When the engine last printed anything (for the watchdog: a search may be quiet for long, but alive). */
+    @Volatile var lastLineAt = 0L
+        private set
     private val sinceGo = ArrayDeque<String>()
     @Volatile private var listenerFailed = false
     private var sentMultiPv = -1
@@ -234,6 +237,7 @@ class UciEngine(
         val r = BufferedReader(InputStreamReader(p.inputStream))
         while (true) {
             val line = try { r.readLine() } catch (_: Exception) { null } ?: break
+            lastLineAt = System.currentTimeMillis()
             if (!line.startsWith("info ") || line.startsWith("info string")) {
                 synchronized(tail) { tail.addLast(line); while (tail.size > 40) tail.removeFirst() }
             }

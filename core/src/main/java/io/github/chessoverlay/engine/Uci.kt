@@ -148,7 +148,15 @@ class PvCollector(private val expected: Int) {
      * whose depth is capped (a strength limit) gives no next iteration that
      * would close this one. Null if nothing is waiting.
      */
-    fun flush(): List<PvLine>? = if (pending.isEmpty()) null else release()
+    fun flush(): List<PvLine>? {
+        if (pending.isEmpty()) return null
+        // An engine that prints its lines one at a time, slower than the flush: the lines not in this part are
+        // kept from the last set (by rank), instead of a set of one line at a time and the others never shown.
+        val merged = (complete.filter { it.multipv !in pending.keys } + pending.values).sortedBy { it.multipv }
+        pending.clear()
+        complete = merged
+        return merged
+    }
 
     /** Lines of an unfinished set are waiting. */
     val waiting: Boolean get() = pending.isNotEmpty()

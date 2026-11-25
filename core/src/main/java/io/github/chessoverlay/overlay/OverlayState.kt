@@ -42,6 +42,8 @@ enum class Look {
     SAME,
     /** A board, but not a position a game can reach (usually a misread mid-move). */
     INVALID,
+    /** A change held until it is read the same way again: no misread, so no pause before the next read. */
+    AGAIN,
     /** No board clear enough. */
     NO_BOARD,
     /** Recognition threw. */

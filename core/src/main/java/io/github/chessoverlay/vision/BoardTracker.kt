@@ -116,7 +116,8 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
             val back: Boolean = false,
         ) : Result()
         /** Recognised, but not a position an engine can take. */
-        data class Invalid(val reason: String) : Result()
+        /** `again`: held until it is read the same way again (not a misread to back off from). */
+        data class Invalid(val reason: String, val again: Boolean = false) : Result()
     }
 
     /**
@@ -126,7 +127,8 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
      */
     fun reset(keepGame: Boolean = false) {
         TrackerLog.add(if (keepGame) "board lost; the game is kept" else "reset: a new game")
-        corners = null; xs = null; ys = null; ref = null; pendingFast = null
+        abandonFast()   // a move seen at once and not yet confirmed is not part of the game
+        corners = null; xs = null; ys = null; ref = null
         if (!keepGame) {
             board = null; lastMove = null
             history.clear(); sideKnown = false; ply = null; repetitions = 1
@@ -318,11 +320,20 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
             if (strict) PositionDecoder.TAU_FOLLOWING else PositionDecoder.TAU_BY_HAND) else null
         val black = decoded?.blackAtBottom
             ?: Orientation.decide(rec.drawn, rec.blackBottomP, prior = if (prev != null) blackAtBottom else null)
-        val read = decoded?.board ?: try {
-            Board.fromPlacement(Orientation.whiteView(rec.drawn, black))
-        } catch (e: IllegalArgumentException) {
-            return Result.Invalid(e.message ?: "bad board")
+        val plainRead = try { Board.fromPlacement(Orientation.whiteView(rec.drawn, black)) } catch (_: IllegalArgumentException) { null }
+        // The picture itself is a position the game went through (an undo of a capture, a step back in the move
+        // list): that, not a move the decoder found by calling a square misread. Otherwise a captured piece that
+        // came back would stay gone for the rest of the game.
+        val backTo = plainRead?.takeIf { p ->
+            decoded != null && p.placement() != decoded.board.placement() && history.any { it.placement == p.placement() }
         }
+        // Two moves explain the reading equally well: which one is not known yet. The last position stays (and
+        // its analysis) until a reading tells them apart, rather than the first of them being taken.
+        if (backTo == null && decoded != null && decoded.ambiguous && strict && sideOverride == null) {
+            return Result.Invalid("two moves explain it equally; reading again", again = true)
+        }
+        val useDecoded = if (backTo != null) null else decoded
+        val read = useDecoded?.board ?: plainRead ?: return Result.Invalid("bad board")
         // The site's last-move highlight says who moved last, when it is clear.
         val hl = LastMoveHighlight.find(img, rec.corners, read, black)
         lastSeen = hl
@@ -338,7 +349,7 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
         }
 
         // How the game got here: one move, or a move each (a quick reply).
-        val moves: List<String>? = decoded?.moves ?: prev?.let { p ->
+        val moves: List<String>? = if (backTo != null) null else useDecoded?.moves ?: prev?.let { p ->
             Board.findMove(p, read)?.let { listOf(it) } ?: Board.findTwoMoves(p, read, prevWhite)?.toList()
         }
         // A move is played by the side to move. When that side is known and a
@@ -347,7 +358,15 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
         // was only guessed, such a move is a move the guess got wrong, and it
         // sets the side right.
         val moverWhite = moves?.firstOrNull()?.let { prev?.get(Board.squareOf(it.substring(0, 2)))?.isUpperCase() }
-        val played = moves != null && moves.isNotEmpty() && (moverWhite == prevWhite || !sideKnown)
+        // A move each that lands on the position two plies back is a takeback of both, when playing them forward
+        // would leave other castling rights than that position had (a rook or king going back): the takeback
+        // restores them, playing on would lose them. (With the same rights the two cannot be told apart, and
+        // the moves are taken as played, so repetitions count.)
+        val twoBack = history.getOrNull(history.size - 2)
+        val takeback = moves != null && moves.size == 2 && prev != null && twoBack != null &&
+            twoBack.placement == read.placement() && twoBack.whiteToMove == prevWhite &&
+            prev.copy().also { x -> moves.forEach { x.play(it) } }.castling() != twoBack.board.castling()
+        val played = !takeback && moves != null && moves.isNotEmpty() && (moverWhite == prevWhite || !sideKnown)
         val playedMoves = if (played) moves else null
         // No move of the game explains the reading. It may be a position the
         // game went through before (a step back of one or more moves, a jump
@@ -379,7 +398,7 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
             if ((diff <= SMALL_CHANGE || unsure) && suspect != b.placement()) {
                 suspect = b.placement()
                 return Result.Invalid(if (diff <= SMALL_CHANGE) "no move explains it; reading again"
-                    else "unsure of the reading (${(rec.confidence * 100).toInt()}%); reading again")
+                    else "unsure of the reading (${(rec.confidence * 100).toInt()}%); reading again", again = true)
             }
         }
         suspect = null
@@ -413,9 +432,11 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
         val oldKnown = sideKnown
         // The side to move is known when the user or a move gave it, when this
         // is the start position, when a check forced it (the side preferred was
-        // impossible), or when a piece going back showed it.
+        // impossible), or when the site's highlight shows it. Not from a piece
+        // going back alone: if the side believed known was wrong, every real
+        // move looks like one, and the wrong side would keep itself going.
         val known = sideOverride != null || playedMoves != null || b.placement() == START ||
-            b.problem(prefer) != null || (backMove != null && oldKnown) || (hl != null && white == !hl.moverWhite)
+            b.problem(prefer) != null || (hl != null && white == !hl.moverWhite)
         if (sameBoard) {
             sideKnown = known
             repetitions = 1 + history.count { it.board.samePosition(b, white) }
