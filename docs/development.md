@@ -161,7 +161,15 @@ CI bundles the Android builds of the Smotherfish release named as `ENGINE_RELEAS
 
 ## Versions and releases
 
-`versionName` and `versionCode` are in `app/build.gradle.kts`. There are no GitHub Releases yet: APKs are the `chessoverlay-apk` artifact of a workflow run.
+`versionCode` is the workflow's run number, so every CI build installs over the one before; `versionName` is the tag for a release and `0.1.0+<run>` otherwise (`app/build.gradle.kts`).
+
+To publish a release, tag a commit on main and push the tag:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+The workflow builds and tests it as for main (signed with the project key), and once `apk`, `engine-arm64` and `device` have passed, the `release` job publishes a GitHub Release named after the tag: `ChessOverlay-v0.2.0.apk`, its `.sha256`, and notes listing the bundled engine and the pull requests merged since the last release. Other builds are the `chessoverlay-apk` artifact of their run.
 
 ## Documentation images
 

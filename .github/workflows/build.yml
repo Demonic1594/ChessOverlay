@@ -10,7 +10,9 @@
 #   machine, a new one each run (docs/development.md, Signing in CI);
 # - engine-arm64: the engines from that APK on real arm64 hardware, run by
 #   the app's own engine code;
-# - device: the app on an x86_64 emulator, with an x86_64 Smotherfish.
+# - device: the app on an x86_64 emulator, with an x86_64 Smotherfish;
+# - release (version tags only, v*): once the others passed, a GitHub
+#   Release with the signed APK, its SHA-256 and notes from the merged PRs.
 # The engine is the release pinned below (ENGINE_RELEASE), so that a build
 # can be repeated and the APK's engine source is known (see
 # THIRD_PARTY_NOTICES.md), unless the workflow is run by hand with another
@@ -20,6 +22,8 @@ name: Build APK
 on:
   push:
     branches: [main]
+    # A version tag (v0.2.0): the same build and tests, then a GitHub Release with the APK (job release).
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -368,3 +372,39 @@ jobs:
             app/build/outputs/androidTest-results/
             app/build/reports/androidTests/
           retention-days: 14
+
+  # A version tag pushed (git tag v0.2.0 && git push origin v0.2.0): the APK every test above passed with, as
+  # a release. It is signed with the project key (a tag is not a pull request), so it installs over the last.
+  release:
+    needs: [apk, engine-arm64, device]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: chessoverlay-apk
+          path: apk
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          apk="ChessOverlay-$TAG.apk"
+          mv apk/app-release.apk "$apk"
+          sha256sum "$apk" > "$apk.sha256"
+          cat > notes.md <<NOTES
+          Bundled engine: Smotherfish $ENGINE_RELEASE (plain and dot-product Android builds, the faster one where the CPU has it).
+
+          Install: download \`$apk\` on the phone and open it (allow installing from this source). It is signed with the project's key, so it installs over an earlier release.
+
+          SHA-256: \`$(cut -d' ' -f1 "$apk.sha256")\`
+
+          Engine help in live games against people is cheating; see the fair-play note in the README.
+          NOTES
+          gh release create "$TAG" "$apk" "$apk.sha256" --repo "$GITHUB_REPOSITORY" \
+            --title "ChessOverlay ${TAG#v}" --notes-file notes.md --generate-notes --verify-tag
