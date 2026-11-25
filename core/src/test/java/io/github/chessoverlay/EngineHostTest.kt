@@ -270,4 +270,36 @@ class EngineHostTest {
             dir.deleteRecursively()
         }
     }
+
+    /**
+     * Quiet after its first lines: an engine that still answers "isready" is
+     * searching deep and is left alone; one that does not has hung and is
+     * restarted.
+     */
+    @Test fun aHungSearchIsToldFromAQuietOne() {
+        for (hangs in listOf(false, true)) {
+            val dir = createTempDir("quiet")
+            val bin = script(dir, "quiet.sh", """
+                n=0
+                while read -r line; do
+                  case "${'$'}line" in
+                    uci) echo "id name Quiet"; echo uciok ;;
+                    isready) echo readyok ;;
+                    go*) n=${'$'}((n+1)); echo "info depth 9 seldepth 9 multipv 1 score cp 20 nodes 900 pv e2e4"
+                         if [ "${'$'}n" = 1 ] && [ "${if (hangs) "yes" else "no"}" = yes ]; then sleep 30; fi ;;
+                    stop) echo "bestmove e2e4" ;;
+                    quit) exit 0 ;;
+                  esac
+                done
+            """)
+            val status = CopyOnWriteArrayList<String>()
+            EngineHost(bin, dir, emptyMap(), onUpdate = {}, onStatus = { status.add(it) }, silentMs = 400).use { host ->
+                host.analyse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 1, 0)
+                Thread.sleep(if (hangs) 7_500 else 2_500)
+                if (hangs) assertTrue("restarted: $status", host.fallback >= 1 && status.any { "restarting" in it })
+                else assertTrue("left alone: $status", host.fallback == 0 && status.isEmpty())
+            }
+            dir.deleteRecursively()
+        }
+    }
 }

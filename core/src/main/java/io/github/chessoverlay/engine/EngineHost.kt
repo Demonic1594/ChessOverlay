@@ -130,8 +130,15 @@ class EngineHost(
             onStatus("The engine crashed twice on this position; skipped")
             return
         }
-        val e = ensureEngine() ?: return
-        e.stop()
+        var e = ensureEngine() ?: return
+        if (!e.stop() && !e.dead) {
+            // No bestmove after "stop" (an engine stuck in its search): its late bestmove would end the next
+            // search. A new process instead.
+            DebugLog.w(TAG, "${e.name}: no bestmove within 3 s of stop; restarting it")
+            engine = null
+            e.kill()
+            e = ensureEngine() ?: return
+        }
         if (pendingNewGame) {
             pendingNewGame = false
             if (!e.newGame()) DebugLog.w(TAG, "${e.name}: no readyok after ucinewgame")
@@ -158,14 +165,28 @@ class EngineHost(
     }
 
     /** `silentMs` after "go": has the engine started searching? */
-    private fun watch(r: Request, e: UciEngine) {
+    private fun watch(r: Request, e: UciEngine, first: Boolean = true) {
         if (closed || current !== r || engine !== e || e.dead || e.bestMoveLine != null) return
-        if (e.pvSinceGo > 0) return
-        if (e.searchOutputSinceGo > 0) {
-            DebugLog.w(TAG, "${e.name} searches but gives no lines after ${silentMs} ms; since go: ${e.sinceGoText()}")
+        if (e.pvSinceGo == 0 && e.searchOutputSinceGo == 0) {
+            silent(r, e, "no search output ${silentMs} ms after go")
             return
         }
-        silent(r, e, "no search output ${silentMs} ms after go")
+        if (first && e.pvSinceGo == 0) {
+            DebugLog.w(TAG, "${e.name} searches but gives no lines after ${silentMs} ms; since go: ${e.sinceGoText()}")
+        }
+        // It searched; while it goes on, it is watched. A deep search can be quiet for long, so quiet alone is no
+        // fault: then it is asked "isready", which an engine answers even in the middle of a search. No answer is
+        // an engine that hung.
+        if (System.currentTimeMillis() - e.lastLineAt >= silentMs && !e.isReady(READY_MS)) {
+            if (current === r && engine === e && !e.dead && e.bestMoveLine == null) {
+                silent(r, e, "no answer to isready during the search")
+            }
+            return
+        }
+        try {
+            exec.schedule({ watch(r, e, first = false) }, silentMs, TimeUnit.MILLISECONDS)
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+        }
     }
 
     /** The engine finished a search without any line. */
@@ -219,8 +240,10 @@ class EngineHost(
             return null
         }
         restartTimes.addLast(now)
+        var starting: UciEngine? = null
         return try {
             val e = UciEngine(executable, workDir) { dead, code -> submit { onDeath(dead, code) } }
+            starting = e
             e.start(startTimeoutMs)
             engineName = e.name
             val sent = applyOptions(e)
@@ -235,7 +258,13 @@ class EngineHost(
             e
         } catch (ex: Exception) {
             DebugLog.e(TAG, "could not start ${executable.name}", ex)
-            if (useAlternative("it did not start")) return ensureEngine()
+            // The other build only when this one cannot run here: it could not be started at all, or it was killed
+            // by "illegal instruction". Not for a passing failure (low memory, a slow start): the faster build
+            // would be given up for the whole session.
+            val code = starting?.exitCode
+            val cannotRun = ex is java.io.IOException || code == SIGILL_EXIT || code == SIGILL
+            if (cannotRun && useAlternative("it did not start (${code?.let { "exit code $it" } ?: ex.javaClass.simpleName})"))
+                return ensureEngine()
             onStatus("Could not start the engine: ${ex.message}")
             null
         }
@@ -296,6 +325,8 @@ class EngineHost(
         /** No search output this long after "go" = a silent engine. */
         const val SILENT_MS = 6_000L
         private const val MAX_FALLBACK = 3
+        /** How long an engine may take to answer "isready" during a search. */
+        private const val READY_MS = 5_000L
         private const val SIGILL = 4
         private const val SIGILL_EXIT = 128 + SIGILL
     }

@@ -9,6 +9,7 @@ import io.github.chessoverlay.engine.FirstLinesGate
 import io.github.chessoverlay.engine.LineStabilizer
 import io.github.chessoverlay.engine.PvLine
 import io.github.chessoverlay.vision.BoardTracker
+import io.github.chessoverlay.vision.unsureSquares
 import io.github.chessoverlay.vision.Img
 import io.github.chessoverlay.vision.ReadStats
 import io.github.chessoverlay.vision.Recognizer
@@ -207,6 +208,9 @@ class Analyst(
     fun dropFast() {
         fastShown = null
         tracker.abandonFast()
+        // The move was shown and analysed: show the game's position again (and analyse it), or the card and
+        // arrows would answer a move never played until the next one comes.
+        tracker.board?.let { start(it, tracker.whiteToMove, null, null, true) }
     }
 
     /**
@@ -240,16 +244,16 @@ class Analyst(
             "${rec.placement} ${if (rec.blackAtBottom) "black" else "white"} at bottom, sure ${(rec.confidence * 100).toInt()}%, " +
             "corners ${rec.corners.joinToString(" ") { "${it[0].toInt()},${it[1].toInt()}" }}" +
             (if (located) recognizer.lastAlignment?.let { "; alignments: $it" } ?: "" else ""))
-        if (rec.confidence < minConfidence && !located) {
+        if (!clearBoard(rec) && !located) {
             rec = try { recognizer.recognise(img) } catch (e: Exception) { rec }
             located = true
         }
         if (located && !plausibleBoard(rec.corners, img.w, img.h)) {
             // Not square, or tiny: something else was taken for a board.
             DebugLog.i(TAG, "located shape is no board")
-            rec = rec.copy(confidence = 0f)
+            rec = rec.copy(confidence = 0f, drawnProbs = null)
         }
-        if (rec.confidence < minConfidence) {
+        if (!clearBoard(rec)) {
             stats.noBoard()
             DebugLog.i(TAG, "no clear board (${(rec.confidence * 100).toInt()}%)")
             // Three times in a row in auto mode: the board has gone (another
@@ -295,9 +299,11 @@ class Analyst(
                     return Look.NEW
                 }
                 r is BoardTracker.Result.Invalid -> {
-                    // Unreadable capture: the move stays shown; the next read checks it again.
-                    DebugLog.i(TAG, "not analysable: ${r.reason} (${rec.placement}); the move seen at once stays until the next read")
-                    return Look.INVALID
+                    // Unreadable capture: back to the game's position (if the move was real, its squares still
+                    // differ from the last read, and it is read again at once).
+                    DebugLog.i(TAG, "not analysable: ${r.reason} (${rec.placement}); the move seen at once is dropped until read")
+                    dropFast()
+                    return if (r.again) Look.AGAIN else Look.INVALID
                 }
                 r is BoardTracker.Result.Same -> {
                     stats.corrected()
@@ -329,10 +335,10 @@ class Analyst(
                 // Almost always a misread (a piece caught mid-animation, a
                 // dragged piece): in auto mode keep the last analysis and
                 // let the next check try again.
-                stats.misread()
+                if (!r.again) stats.misread()
                 DebugLog.i(TAG, "not analysable: ${r.reason} (${rec.placement})")
                 if (!auto) publish(state.copy(status = "Board misread (${r.reason}); try ▶ again"))
-                Look.INVALID
+                if (r.again) Look.AGAIN else Look.INVALID
             }
             is BoardTracker.Result.Position -> {
                 if (r.back) DebugLog.i(TAG, "back to a position the game was in before${noteOf(tracker)}: ${r.board.placement()}")
@@ -341,6 +347,14 @@ class Analyst(
             }
         }
     }
+
+    /**
+     * A board is there to read: at most MAX_UNSURE_SQUARES squares under
+     * minConfidence. One unsure square (an arrow the user drew over a piece)
+     * is left to the decoder; it does not make the whole board "no board".
+     */
+    private fun clearBoard(rec: io.github.chessoverlay.vision.Recognition) =
+        rec.confidence >= minConfidence || rec.unsureSquares(minConfidence) <= MAX_UNSURE_SQUARES
 
     /** Analyse the current position again (side to move changed by hand). */
     @Synchronized
@@ -448,6 +462,8 @@ class Analyst(
     }
 
     companion object {
+        /** Squares a board may be unsure of and still be read (see clearBoard). */
+        const val MAX_UNSURE_SQUARES = 3
         private const val TAG = "Analyst"
         const val ANALYSING = OverlayState.ANALYSING
         private const val MIN_DEPTH = 8

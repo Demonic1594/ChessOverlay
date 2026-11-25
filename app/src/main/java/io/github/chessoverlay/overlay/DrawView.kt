@@ -39,7 +39,8 @@ class DrawView(ctx: Context, private val style: () -> BoardStyle) : View(ctx) {
      */
     fun clear(): Boolean {
         val now = android.os.SystemClock.uptimeMillis()
-        val recent = shapes.isNotEmpty() || now - replacedAt < RECENT_MS
+        // Hidden with the eye button, it was never on screen: no frame has to come before the capture.
+        val recent = visibility == VISIBLE && (shapes.isNotEmpty() || now - replacedAt < RECENT_MS)
         drawing.clear()
         replace(emptyList())
         return recent

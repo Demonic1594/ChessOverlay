@@ -162,6 +162,9 @@ class OverlayWindows(
             lp.x = (startX + dx).coerceIn(-lp.width / 2, screenW - lp.width / 2)
             lp.y = (startY + dy).coerceIn(0, maxOf(0, screenH - v.height / 2))
             runCatching { wm.updateViewLayout(v, lp) }
+            // Where the card is now, while it moves: what it covers is not read as a change of the board, and a
+            // capture hides it where it is. (A window moved does not lay out again, so this is set here.)
+            if (v.width > 0) cardRect = intArrayOf(lp.x, lp.y, lp.x + v.width, lp.y + v.height)
             if (done) {
                 moving = false
                 prefs.cardX = lp.x

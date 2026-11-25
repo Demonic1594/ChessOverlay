@@ -24,7 +24,7 @@ class ReadPacing(private val retryMs: Long = RETRY_MS, private val findMs: Long 
     /** A read ended with `r` (in auto mode: a miss starts or lengthens the pause). */
     fun done(now: Long, r: Look, auto: Boolean) {
         lastRead = now
-        if (r == Look.NEW || r == Look.SAME) {
+        if (r == Look.NEW || r == Look.SAME || r == Look.AGAIN) {
             misses = 0; retryAt = 0L
         } else if (auto) {
             misses = minOf(misses + 1, MAX_MISSES)

@@ -90,6 +90,8 @@ class OverlayService : Service() {
     private var screenH = 0
 
     @Volatile private var auto = false
+    /** onDestroy() ran: a setUp() still running starts nothing more. */
+    @Volatile private var destroyed = false
     @Volatile private var shown = true
     /** While a read's capture is pending, the board layer shows nothing whatever the analyst publishes (see captureBoard). */
     @Volatile private var holdDrawing = false
@@ -234,10 +236,11 @@ class OverlayService : Service() {
         }
         analyst = a
         ready = a
+        if (destroyed) return   // closed while starting: onDestroy's cleanup on this thread closes what is made
         host.start()
         DebugLog.i(TAG, "ready: ${info.title}, ${prefs.lines} lines, think ${prefs.thinkMs} ms")
         postState(OverlayState(status = if (prefs.autoStart) "Looking for a board…" else "Tap ▶ to read the screen, A for auto mode"))
-        main.post { if (prefs.autoStart && !auto) toggleAuto() }
+        main.post { if (!destroyed && prefs.autoStart && !auto) toggleAuto() }
     }
 
     private fun boardStyle() = BoardStyle(prefs.arrows, prefs.pathPlies, prefs.arrowLabels, density)
@@ -316,16 +319,18 @@ class OverlayService : Service() {
         // sooner in the analysis.
         watcher.stillMs = if (a.board.fastGame()) STILL_MS_FAST else STILL_MS
         val now = SystemClock.uptimeMillis()
-        if (!pacing.mayRead(now)) return
         val tracker = a.board
         val pts = tracker.points()
         if (pts == null) {
             // No board yet: look for one now and then (our layer is empty, so
             // nothing flickers), once the screen is still: a board caught in
             // a site's opening animation would be found in the wrong place.
+            // Not after the pause of misreads: a board coming back (after a
+            // notification) is looked for within FIND_MS, not up to 8 s later.
             if (pacing.mayFind(now) && screenStill(now)) read(auto = true)
             return
         }
+        if (!pacing.mayRead(now)) return
         val s = screen ?: return
         // No new frame since the last check (Android sends one only when the screen changes): the same pixels,
         // not read again. The watcher still gets them, as its stillness wait counts on.
@@ -397,7 +402,7 @@ class OverlayService : Service() {
                 } else {
                     // Keep the screen when a board is read wrongly time and again, to share from the app. Not when
                     // there is no board: that is any other screen the user went to.
-                    if (auto && r != Look.NEW && r != Look.SAME && r != Look.NO_BOARD && pacing.misses >= 1 && img != null)
+                    if (auto && (r == Look.INVALID || r == Look.FAILED) && pacing.misses >= 1 && img != null)
                         DebugCapture.save(this@OverlayService, img, "$r")
                     // A misread or no board: try again soon, then less often.
                     pacing.done(now, r, auto)
@@ -436,7 +441,9 @@ class OverlayService : Service() {
         holdDrawing = true
         main.post {
             // A frame captured in the last moment may still show the drawing: then a newer one is waited for.
-            val hiddenAt = SystemClock.uptimeMillis() - if (draw?.clear() == true) 0L else HIDE_WAIT_MS
+            // So may a frame from before the card was hidden over the board.
+            val drawn = draw?.clear() == true
+            val hiddenAt = SystemClock.uptimeMillis() - if (drawn || hideCard) 0L else HIDE_WAIT_MS
             if (hideCard) windows.cardVisible(false)
             work.post(object : Runnable {
                 var waited = 0L
@@ -523,13 +530,17 @@ class OverlayService : Service() {
         work.removeCallbacksAndMessages(null)
         main.removeCallbacksAndMessages(null)
         windows.remove()
-        val e = engine; val r = recognizer; val s = screen
-        engine = null; recognizer = null; analyst = null; screen = null
+        destroyed = true
         prefs.recognizerInUse = null
+        // On the worker: a setUp() still running there (the first start measures for seconds) finishes first, and
+        // what it made is closed too, instead of an engine process and the models left running.
         work.post {
+            val e = engine; val r = recognizer; val s = screen
+            engine = null; recognizer = null; analyst = null; screen = null
             runCatching { e?.close() }
             runCatching { r?.close() }
             runCatching { s?.close() }
+            prefs.recognizerInUse = null
             worker.quitSafely()
         }
         runCatching { projection?.stop() }
