@@ -34,4 +34,22 @@ class DebugLogTest {
             dir.deleteRecursively()
         }
     }
+
+    /** A long session does not grow the file without end: past its size it becomes debug.log.1. */
+    @Test fun theFileIsRotatedDuringASession() {
+        val dir = createTempDirectory("log").toFile()
+        try {
+            DebugLog.useDir(dir)
+            DebugLog.clear()
+            val filler = "x".repeat(200)
+            repeat(3000) { DebugLog.i("T", "$it $filler") }
+            val now = File(dir, "debug.log"); val old = File(dir, "debug.log.1")
+            assertTrue("rotated", old.exists())
+            assertTrue("${now.length()} bytes", now.length() < 512 * 1024)
+            assertTrue("the latest line is kept", DebugLog.dump().trimEnd().endsWith("2999 $filler"))
+            DebugLog.clear()
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }
