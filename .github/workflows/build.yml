@@ -11,8 +11,9 @@
 # - engine-arm64: the engines from that APK on real arm64 hardware, run by
 #   the app's own engine code;
 # - device: the app on an x86_64 emulator, with an x86_64 Smotherfish;
-# - release (version tags only, v*): once the others passed, a GitHub
-#   Release with the signed APK, its SHA-256 and notes from the merged PRs.
+# - release (a version tag pushed, or a run by hand with "release" set to
+#   one): once the others passed, a GitHub Release with the signed APK, its
+#   SHA-256 and notes from the merged PRs.
 # The engine is the release pinned below (ENGINE_RELEASE), so that a build
 # can be repeated and the APK's engine source is known (see
 # THIRD_PARTY_NOTICES.md), unless the workflow is run by hand with another
@@ -29,6 +30,10 @@ on:
     inputs:
       engine_release:
         description: "Smotherfish release tag to bundle (default: the one pinned below)"
+        required: false
+        default: ""
+      release:
+        description: "Publish a release with this version tag (e.g. v0.1.0), created on the commit built; empty for a plain build"
         required: false
         default: ""
 
@@ -145,6 +150,7 @@ jobs:
       - name: Build the APK
         run: ./gradlew --no-daemon assembleRelease
         env:
+          RELEASE_TAG: ${{ github.event.inputs.release }}
           SIGNING_STORE_FILE: ${{ steps.key.outputs.file }}
           SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -377,7 +383,7 @@ jobs:
   # a release. It is signed with the project key (a tag is not a pull request), so it installs over the last.
   release:
     needs: [apk, engine-arm64, device]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.event.inputs.release, 'v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -391,7 +397,8 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          # A tag pushed, or one given when running the workflow by hand (then the release makes the tag).
+          TAG: ${{ github.event.inputs.release || github.ref_name }}
         run: |
           set -euo pipefail
           apk="ChessOverlay-$TAG.apk"
@@ -407,4 +414,4 @@ jobs:
           Engine help in live games against people is cheating; see the fair-play note in the README.
           NOTES
           gh release create "$TAG" "$apk" "$apk.sha256" --repo "$GITHUB_REPOSITORY" \
-            --title "ChessOverlay ${TAG#v}" --notes-file notes.md --generate-notes --verify-tag
+            --title "ChessOverlay ${TAG#v}" --notes-file notes.md --generate-notes --target "$GITHUB_SHA"

@@ -169,6 +169,8 @@ To publish a release, tag a commit on main and push the tag:
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
+Or, without a tag of your own: Actions, Build APK, Run workflow on `main`, with `release` set to the version (`v0.2.0`); the release then makes the tag on the commit built.
+
 The workflow builds and tests it as for main (signed with the project key), and once `apk`, `engine-arm64` and `device` have passed, the `release` job publishes a GitHub Release named after the tag: `ChessOverlay-v0.2.0.apk`, its `.sha256`, and notes listing the bundled engine and the pull requests merged since the last release. Other builds are the `chessoverlay-apk` artifact of their run.
 
 ## Documentation images
