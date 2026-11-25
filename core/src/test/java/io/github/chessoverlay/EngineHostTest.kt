@@ -183,4 +183,91 @@ class EngineHostTest {
         }
         dir.deleteRecursively()
     }
+
+    /** What the host sends: MultiPV only when it changes, "ucinewgame" once when a new game is announced. */
+    @Test fun optionsOnceAndANewGame() {
+        val dir = createTempDir("said")
+        val heard = File(dir, "heard.txt")
+        val bin = File(dir, "said.sh")
+        bin.writeText("""
+            #!/bin/sh
+            while read -r line; do
+              echo "${'$'}line" >> "${heard.absolutePath}"
+              case "${'$'}line" in
+                uci) echo "id name Said"; echo "option name MultiPV type spin default 1 min 1 max 5"
+                     echo "option name UCI_AnalyseMode type check default false"; echo uciok ;;
+                isready) echo readyok ;;
+                go*) echo "info depth 1 seldepth 1 multipv 1 score cp 5 nodes 10 pv e2e4" ;;
+                stop) echo "bestmove e2e4" ;;
+                quit) exit 0 ;;
+              esac
+            done
+        """.trimIndent() + "\n")
+        bin.setExecutable(true)
+        val fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        EngineHost(bin, dir, emptyMap(), onUpdate = {}, onStatus = {}).use { host ->
+            host.analyse(fen, 1, 0); Thread.sleep(400)
+            host.analyse(fen.replace(" w ", " b "), 1, 0); Thread.sleep(400)
+            host.newGame()
+            host.analyse(fen, 2, 0); Thread.sleep(400)
+        }
+        val said = heard.readLines()
+        println(said.joinToString(" | "))
+        assertTrue("MultiPV 1 once: $said", said.count { it == "setoption name MultiPV value 1" } == 1)
+        assertTrue("then 2: $said", said.count { it == "setoption name MultiPV value 2" } == 1)
+        assertTrue("analyse mode once: $said", said.count { it.startsWith("setoption name UCI_AnalyseMode") } == 1)
+        val ng = said.indexOf("ucinewgame")
+        assertTrue("one ucinewgame: $said", ng > 0 && said.count { it == "ucinewgame" } == 1)
+        assertTrue("before the third search: $said", said.withIndex().count { (i, l) -> l.startsWith("go") && i > ng } == 1)
+        dir.deleteRecursively()
+    }
+
+    private fun script(dir: File, name: String, body: String): File =
+        File(dir, name).apply { writeText("#!/bin/sh\n" + body.trimIndent() + "\n"); setExecutable(true) }
+
+    private val good = """
+        while read -r line; do
+          case "${'$'}line" in
+            uci) echo "id name Plain"; echo uciok ;;
+            isready) echo readyok ;;
+            go*) echo "info depth 5 seldepth 5 multipv 1 score cp 20 nodes 100 pv e2e4" ;;
+            stop) echo "bestmove e2e4" ;;
+            quit) exit 0 ;;
+          esac
+        done
+    """
+
+    /**
+     * The faster build on a CPU without its instructions: killed by SIGILL,
+     * at the first search or before it answers "uci". The host moves to the
+     * plain build and the lines come; the user is not told of a crash.
+     */
+    @Test fun anIllegalInstructionMovesToThePlainBuild() {
+        for (whenDies in listOf("go", "uci")) {
+            val dir = createTempDir("sigill")
+            val fast = script(dir, "fast.sh", """
+                while read -r line; do
+                  case "${'$'}line" in
+                    $whenDies*) kill -ILL ${'$'}${'$'} ;;
+                    uci) echo "id name Fast"; echo uciok ;;
+                    isready) echo readyok ;;
+                  esac
+                done
+            """)
+            val plain = script(dir, "plain.sh", good)
+            val updates = CopyOnWriteArrayList<AnalysisUpdate>()
+            val status = CopyOnWriteArrayList<String>()
+            EngineHost(fast, dir, emptyMap(), onUpdate = { updates.add(it) }, onStatus = { status.add(it) },
+                alternative = plain).use { host ->
+                host.analyse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 1, 0)
+                val until = System.currentTimeMillis() + 10_000
+                while (System.currentTimeMillis() < until && updates.none { it.lines.isNotEmpty() }) Thread.sleep(50)
+                assertTrue("lines from the plain build ($whenDies); status $status\n${DebugLog.dump().takeLast(1500)}",
+                    updates.any { it.lines.isNotEmpty() })
+                assertTrue(host.executable == plain)
+                assertTrue("no crash shown ($whenDies): $status", status.none { "stopped" in it || "Could not" in it })
+            }
+            dir.deleteRecursively()
+        }
+    }
 }

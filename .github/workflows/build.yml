@@ -1,19 +1,20 @@
 # Builds and tests the APK. Runs for pull requests, pushes to main and by
 # hand; the jobs:
-# - apk: Smotherfish for arm64 (Android NDK) bundled as libsmotherfish.so,
-#   the recognition models, the unit tests (the recognizer against
+# - apk: Smotherfish's release builds for arm64 (plain and dot product)
+#   bundled as libsmotherfish.so and libsmotherfish_dotprod.so, the
+#   recognition models, the unit tests (the recognizer against
 #   chessimg2pos's recorded Python output), then app-release.apk as an
 #   artifact. For pushes to main and runs by hand it is signed with the
 #   project key (secrets ANDROID_KEYSTORE_*), so that a newer build installs
 #   over an older one; a pull request's APK with the debug key of the build
 #   machine, a new one each run (docs/development.md, Signing in CI);
-# - engine-arm64: the engine from that APK on real arm64 hardware, run by the
-#   app's own engine code;
+# - engine-arm64: the engines from that APK on real arm64 hardware, run by
+#   the app's own engine code;
 # - device: the app on an x86_64 emulator, with an x86_64 Smotherfish.
-# The engine is built from ENGINE_REF: the commit pinned below, so that a
-# build can be repeated and the APK's engine source is known (see
+# The engine is the release pinned below (ENGINE_RELEASE), so that a build
+# can be repeated and the APK's engine source is known (see
 # THIRD_PARTY_NOTICES.md), unless the workflow is run by hand with another
-# branch, tag or commit.
+# release tag.
 name: Build APK
 
 on:
@@ -22,16 +23,22 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      engine_ref:
-        description: "Smotherfish branch, tag or commit to bundle"
+      engine_release:
+        description: "Smotherfish release tag to bundle (default: the one pinned below)"
         required: false
-        default: "smotherfish"
+        default: ""
 
 env:
-  # The Smotherfish commit bundled by default: the head of its branch
-  # `smotherfish` on 2026-11-23, built and tested by the run of that day.
-  # To move on, change this commit (and THIRD_PARTY_NOTICES.md with it).
-  ENGINE_REF: ${{ github.event.inputs.engine_ref || '33bbe36148e42b08e496027a48dc227212845ebd' }}
+  # The Smotherfish release bundled: its Android builds, checked against
+  # the SHA-256 sums below. To move on, change the release, the two sums
+  # (the release page lists them) and the commit, and THIRD_PARTY_NOTICES.md.
+  DEFAULT_RELEASE: v1.5.1
+  ENGINE_RELEASE: ${{ github.event.inputs.engine_release || 'v1.5.1' }}
+  SHA_PLAIN: 0bb8327e0c9d2985bd5f907f27090f691f9e30d863dd049cd67d06c2612e0f1a
+  SHA_DOTPROD: 4f4eb4886bf91b73005b33f11e7a8ff4c0a1197f2862f7d09b99f119c3731821
+  # The emulator needs an x86_64 build, which the release does not have:
+  # built from the release's tag (its commit f01cf48 for v1.5.1).
+  ENGINE_REF: ${{ github.event.inputs.engine_release || 'v1.5.1' }}
   NDK_VERSION: "27.2.12479018"
 
 jobs:
@@ -45,6 +52,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
 
       - name: Recognition models (cached)
         uses: actions/cache@v4
@@ -89,26 +97,33 @@ jobs:
 
       # The engine comes after the tests: a change in the Kotlin shows in the
        # tests a few minutes sooner, and they do not need it.
-      - name: Android NDK
+      # Smotherfish's own release builds (the network is inside each binary, about 140 MB): the plain Armv8
+      # build and the faster Armv8.2 dot-product one. The app starts the faster one where the CPU has those
+      # instructions (EngineRegistry), the plain one elsewhere. Each file is checked against its SHA-256 before
+      # it goes into the APK: pinned below for the default release, the release's own digest for another tag.
+      - name: Smotherfish ${{ env.ENGINE_RELEASE }} (release builds)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION" > /dev/null
-          echo "NDK_BIN=$ANDROID_HOME/ndk/$NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_ENV"
-
-      - name: Build Smotherfish (arm64, static)
-        run: |
-          git init -q engine
-          git -C engine remote add origin https://github.com/Demonic1594/Smotherfish.git
-          git -C engine fetch -q --depth 1 origin "$ENGINE_REF"
-          git -C engine checkout -q FETCH_HEAD
-          cd engine/src
-          make -j"$(nproc)" net
-          PATH="$NDK_BIN:$PATH" make -j"$(nproc)" build ARCH=armv8 COMP=ndk EXTRALDFLAGS="-static" > ../build.log 2>&1 \
-            || { tail -40 ../build.log; exit 1; }
-          "$NDK_BIN/llvm-strip" stockfish
-          file stockfish
-          mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a"
-          cp stockfish "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libsmotherfish.so"
-          echo "Bundled Smotherfish $(git -C .. rev-parse --short HEAD) ($ENGINE_REF)"
+          set -euo pipefail
+          base="https://github.com/Demonic1594/Smotherfish/releases/download/$ENGINE_RELEASE"
+          v="${ENGINE_RELEASE#v}"
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          for pair in "android-arm64:libsmotherfish.so" "android-arm64-dotprod:libsmotherfish_dotprod.so"; do
+            asset="smotherfish-$v-${pair%%:*}"; lib="${pair##*:}"
+            curl -fsSL --retry 4 --retry-delay 5 -o "app/src/main/jniLibs/arm64-v8a/$lib" "$base/$asset"
+            if [ "$ENGINE_RELEASE" = "$DEFAULT_RELEASE" ]; then
+              want=$(case "$asset" in *-dotprod) echo "$SHA_DOTPROD";; *) echo "$SHA_PLAIN";; esac)
+            else
+              want=$(gh api "repos/Demonic1594/Smotherfish/releases/tags/$ENGINE_RELEASE" \
+                --jq ".assets[] | select(.name == \"$asset\") | .digest" | sed 's/^sha256://')
+            fi
+            got=$(sha256sum "app/src/main/jniLibs/arm64-v8a/$lib" | cut -d' ' -f1)
+            [ -n "$want" ] && [ "$got" = "$want" ] || { echo "$asset: SHA-256 $got, expected ${want:-none}"; exit 1; }
+            chmod +x "app/src/main/jniLibs/arm64-v8a/$lib"
+            file "app/src/main/jniLibs/arm64-v8a/$lib"
+            echo "Bundled $asset as $lib ($got)"
+          done
 
       # The project's signing key, for the APKs meant for installing (pushes
       # to main, runs by hand). Not for pull requests: their code could print
@@ -207,22 +222,31 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
 
       - uses: actions/download-artifact@v4
         with:
           name: chessoverlay-apk
           path: apk
 
-      - name: The engine from the APK
+      - name: The engines from the APK
         run: |
-          unzip -q -o apk/app-release.apk 'lib/arm64-v8a/libsmotherfish.so' -d apk/x
-          chmod +x apk/x/lib/arm64-v8a/libsmotherfish.so
+          unzip -q -o apk/app-release.apk 'lib/arm64-v8a/libsmotherfish*.so' -d apk/x
+          chmod +x apk/x/lib/arm64-v8a/libsmotherfish*.so
           echo "cores: $(nproc)"; uname -m
-          timeout 300 apk/x/lib/arm64-v8a/libsmotherfish.so bench 16 1 12 2>&1 | tail -4
+          grep -m1 '^Features' /proc/cpuinfo
+          for e in apk/x/lib/arm64-v8a/libsmotherfish.so apk/x/lib/arm64-v8a/libsmotherfish_dotprod.so; do
+            echo "== $e"
+            timeout 300 "$e" bench 16 1 12 2>&1 | tail -4
+          done
 
+      # The faster build where it runs (this runner's CPU has the dot product), as a phone from 2019 on would.
       - name: The app's engine code against it
         run: |
-          CORE_ONLY=1 ENGINE_BIN="$PWD/apk/x/lib/arm64-v8a/libsmotherfish.so" ENGINE_THREADS=4 ENGINE_SECS=5 \
+          bin=apk/x/lib/arm64-v8a/libsmotherfish.so
+          grep -qw asimddp /proc/cpuinfo && bin=apk/x/lib/arm64-v8a/libsmotherfish_dotprod.so
+          echo "testing $bin"
+          CORE_ONLY=1 ENGINE_BIN="$PWD/$bin" ENGINE_THREADS=4 ENGINE_SECS=5 \
             ./gradlew --no-daemon :core:test --tests '*EngineHostTest*'
 
       - uses: actions/upload-artifact@v4
@@ -244,6 +268,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
 
       - name: Enable KVM
         run: |
@@ -251,16 +276,35 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      # A branch or tag given by hand is resolved to its commit, so the cache never serves an older build of it.
+      - name: Engine commit
+        run: |
+          refs=$(git ls-remote https://github.com/Demonic1594/Smotherfish.git "$ENGINE_REF" "refs/tags/$ENGINE_REF^{}")
+          # An annotated tag: its commit (the "^{}" line), not the tag object.
+          sha=$(echo "$refs" | grep '\^{}$' | cut -f1 | head -1)
+          [ -n "$sha" ] || sha=$(echo "$refs" | head -1 | cut -f1)
+          echo "ENGINE_SHA=${sha:-$ENGINE_REF}" >> "$GITHUB_ENV"
+
+      # The engine only changes with ENGINE_REF (and the NDK): built once, then taken from the cache.
+      - name: Smotherfish x86_64 (cached)
+        id: engine-x86_64
+        uses: actions/cache@v4
+        with:
+          path: engine-x86_64
+          key: smotherfish-x86_64-${{ env.ENGINE_SHA }}-ndk${{ env.NDK_VERSION }}
+
       - name: Android NDK
+        if: steps.engine-x86_64.outputs.cache-hit != 'true'
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION" > /dev/null
           echo "NDK_BIN=$ANDROID_HOME/ndk/$NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_ENV"
 
       - name: Build Smotherfish (x86_64, for the emulator)
+        if: steps.engine-x86_64.outputs.cache-hit != 'true'
         run: |
           git init -q engine
           git -C engine remote add origin https://github.com/Demonic1594/Smotherfish.git
-          git -C engine fetch -q --depth 1 origin "$ENGINE_REF"
+          git -C engine fetch -q --depth 1 origin "$ENGINE_SHA"
           git -C engine checkout -q FETCH_HEAD
           cd engine/src
           make -j"$(nproc)" net
@@ -268,8 +312,15 @@ jobs:
             || { tail -40 ../build.log; exit 1; }
           "$NDK_BIN/llvm-strip" stockfish
           file stockfish
-          mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs/x86_64"
-          cp stockfish "$GITHUB_WORKSPACE/app/src/main/jniLibs/x86_64/libsmotherfish.so"
+          mkdir -p "$GITHUB_WORKSPACE/engine-x86_64"
+          cp stockfish "$GITHUB_WORKSPACE/engine-x86_64/libsmotherfish.so"
+          git -C .. rev-parse --short HEAD > "$GITHUB_WORKSPACE/engine-x86_64/commit"
+
+      - name: Bundle Smotherfish (x86_64)
+        run: |
+          mkdir -p app/src/main/jniLibs/x86_64
+          cp engine-x86_64/libsmotherfish.so app/src/main/jniLibs/x86_64/
+          echo "Bundled Smotherfish $(cat engine-x86_64/commit) ($ENGINE_REF)"
 
       - name: Recognition models (cached)
         uses: actions/cache@v4

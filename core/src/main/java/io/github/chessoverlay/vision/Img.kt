@@ -46,6 +46,73 @@ class Img(val w: Int, val h: Int, val px: IntArray = IntArray(w * h)) {
         return img
     }
 
+    /**
+     * The same as crop(x0, y0, x0 + vw, y0 + vh).resize(nw, nh), to the
+     * pixel, without making the crop: the region is read where it lies,
+     * black outside the image (so padSquare(side).resize(n, n) is
+     * region(0, 0, side, side, n, n)). For the locator a phone screen padded
+     * to a square is about 40 MB; this needs a few.
+     *
+     * Only the region's first `cw` columns and `ch` rows are read, the rest
+     * is black: crop(x0, y0, x0 + cw, y0 + ch).padSquare(side).resize(n, n)
+     * is region(x0, y0, side, side, n, n, cw, ch).
+     */
+    fun resizeRegion(x0: Int, y0: Int, vw: Int, vh: Int, nw: Int, nh: Int, cw: Int = vw, ch: Int = vh): Img {
+        // The horizontal pass, over the region's rows that lie in the image (the others stay black).
+        val mid = Img(nw, vh)
+        val xEnd = min(w, x0 + min(cw, vw))
+        val rows = max(0, y0)..min(h - 1, y0 + min(ch, vh) - 1)
+        if (nw == vw) {
+            for (sy in rows) for (x in 0 until vw) {
+                val sx = x0 + x
+                if (sx in 0 until xEnd) mid.px[(sy - y0) * nw + x] = px[sy * w + sx]
+            }
+        } else {
+            val (bounds, coeffs, ksize) = precompute(vw, nw)
+            val half = 1 shl (PRECISION_BITS - 1)
+            for (sy in rows) {
+                val row = sy * w
+                val out = (sy - y0) * nw
+                for (xx in 0 until nw) {
+                    val xmin = bounds[2 * xx]
+                    val xmax = bounds[2 * xx + 1]
+                    var r = half; var g = half; var b = half
+                    for (x in 0 until xmax) {
+                        val sx = x0 + xmin + x
+                        if (sx < 0 || sx >= xEnd) continue
+                        val k = coeffs[xx * ksize + x]
+                        val p = px[row + sx]
+                        r += ((p shr 16) and 0xff) * k
+                        g += ((p shr 8) and 0xff) * k
+                        b += (p and 0xff) * k
+                    }
+                    mid.px[out + xx] = (clip8(r) shl 16) or (clip8(g) shl 8) or clip8(b)
+                }
+            }
+        }
+        if (nh == vh) return mid
+        // The vertical pass, straight down the columns (no transposes).
+        val (bounds, coeffs, ksize) = precompute(vh, nh)
+        val half = 1 shl (PRECISION_BITS - 1)
+        val out = Img(nw, nh)
+        for (yy in 0 until nh) {
+            val ymin = bounds[2 * yy]
+            val ymax = bounds[2 * yy + 1]
+            for (x in 0 until nw) {
+                var r = half; var g = half; var b = half
+                for (y in 0 until ymax) {
+                    val k = coeffs[yy * ksize + y]
+                    val p = mid.px[(ymin + y) * nw + x]
+                    r += ((p shr 16) and 0xff) * k
+                    g += ((p shr 8) and 0xff) * k
+                    b += (p and 0xff) * k
+                }
+                out.px[yy * nw + x] = (clip8(r) shl 16) or (clip8(g) shl 8) or clip8(b)
+            }
+        }
+        return out
+    }
+
     private fun transpose(): Img {
         val out = Img(h, w)
         for (y in 0 until h) for (x in 0 until w) out.px[x * h + y] = px[y * w + x]

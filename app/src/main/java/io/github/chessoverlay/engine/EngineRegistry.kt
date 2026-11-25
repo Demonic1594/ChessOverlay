@@ -9,8 +9,11 @@ import android.os.Build
 import org.xmlpull.v1.XmlPullParser
 import java.io.File
 
-/** An engine the app can start. `id` is stable across launches. */
-data class EngineInfo(val id: String, val title: String, val file: File, val kind: Kind) {
+/**
+ * An engine the app can start. `id` is stable across launches.
+ * `alternative`: another build of it to start if `file` cannot run here.
+ */
+data class EngineInfo(val id: String, val title: String, val file: File, val kind: Kind, val alternative: File? = null) {
     enum class Kind { BUNDLED, OPEN_EXCHANGE, IMPORTED }
 }
 
@@ -31,16 +34,27 @@ class EngineRegistry(private val ctx: Context) {
 
     fun all(): List<EngineInfo> = bundled() + openExchange() + imported()
 
+    /**
+     * The engines in the APK. Smotherfish comes in two builds: the faster
+     * one (Armv8.2 dot product, most phones from about 2019 on) where the CPU
+     * has those instructions, the plain one elsewhere. Both are one engine
+     * to the user, with one id and one set of options; the plain build is
+     * the alternative if the faster one does not run after all.
+     */
     fun bundled(): List<EngineInfo> {
         val dir = File(ctx.applicationInfo.nativeLibraryDir)
-        return (dir.listFiles() ?: emptyArray())
-            .filter { it.name.startsWith("lib") && it.name.endsWith(".so") && it.name in BUNDLED_TITLES }
-            .map { EngineInfo("bundled:${it.name}", BUNDLED_TITLES.getValue(it.name), it, EngineInfo.Kind.BUNDLED) }
+        val files = (dir.listFiles() ?: emptyArray()).filter { it.isFile }.associateBy { it.name }
+        val plain = files[SMOTHERFISH]
+        val fast = files[SMOTHERFISH_DOTPROD]?.takeIf { CpuFeatures.hasDotProd() }
+        val out = ArrayList<EngineInfo>()
+        if (fast != null) out += EngineInfo("bundled:$SMOTHERFISH", "Smotherfish (built in)", fast, EngineInfo.Kind.BUNDLED, plain)
+        else if (plain != null) out += EngineInfo("bundled:$SMOTHERFISH", "Smotherfish (built in)", plain, EngineInfo.Kind.BUNDLED)
+        return out
     }
 
     fun imported(): List<EngineInfo> {
         val dir = File(engineDir, "user")
-        return (dir.listFiles() ?: emptyArray()).filter { it.isFile }.sortedBy { it.name }
+        return (dir.listFiles() ?: emptyArray()).filter { it.isFile && !it.name.endsWith(".tmp") }.sortedBy { it.name }
             .map { EngineInfo("user:${it.name}", it.name, it, EngineInfo.Kind.IMPORTED) }
     }
 
@@ -50,14 +64,35 @@ class EngineRegistry(private val ctx: Context) {
         val dest = File(File(engineDir, "user").apply { mkdirs() }, safe)
         ctx.contentResolver.openInputStream(uri).use { input ->
             requireNotNull(input) { "cannot read $uri" }
-            dest.outputStream().use { input.copyTo(it) }
+            copyAtomically(input, dest)
         }
-        dest.setExecutable(true, false)
         return EngineInfo("user:${dest.name}", dest.name, dest, EngineInfo.Kind.IMPORTED)
     }
 
     fun delete(e: EngineInfo) {
-        if (e.kind == EngineInfo.Kind.IMPORTED || e.kind == EngineInfo.Kind.OPEN_EXCHANGE) e.file.delete()
+        if (e.kind == EngineInfo.Kind.IMPORTED || e.kind == EngineInfo.Kind.OPEN_EXCHANGE) {
+            e.file.delete()
+            File(e.file.path + ".stamp").delete()
+        }
+    }
+
+    /**
+     * Copies to a temporary file and renames it into place: an interrupted
+     * copy (the app killed, the disk full) never leaves half an engine
+     * that would then be started.
+     */
+    private fun copyAtomically(input: java.io.InputStream, dest: File) {
+        val tmp = File(dest.path + ".tmp")
+        try {
+            tmp.outputStream().use { input.copyTo(it) }
+            tmp.setExecutable(true, false)
+            if (!tmp.renameTo(dest)) {
+                dest.delete()
+                if (!tmp.renameTo(dest)) throw java.io.IOException("could not move ${tmp.name} into place")
+            }
+        } finally {
+            tmp.delete()
+        }
     }
 
     /** Engines offered by installed Open Exchange engine apps, copied in. */
@@ -80,15 +115,18 @@ class EngineRegistry(private val ctx: Context) {
                 @Suppress("DiscouragedApi")
                 val id = res.getIdentifier("enginelist", "xml", ai.packageName)
                 if (id == 0) continue
+                // Copied again when the engine app was updated (a new engine version), not only once.
+                @Suppress("DEPRECATION")
+                val stamp = runCatching { pm.getPackageInfo(ai.packageName, 0).lastUpdateTime }.getOrDefault(0L)
                 for ((title, fileName, targets) in parseEngineList(res.getXml(id))) {
                     if (abi !in targets) continue
                     val dest = File(File(engineDir, "oex").apply { mkdirs() }, "${ai.packageName}_$fileName")
-                    if (!dest.exists()) {
+                    val stampFile = File(dest.path + ".stamp")
+                    val copied = runCatching { stampFile.readText().toLong() }.getOrNull()
+                    if (!dest.exists() || copied != stamp) {
                         val uri = Uri.parse("content://$authority/$fileName")
-                        ctx.contentResolver.openInputStream(uri)?.use { input ->
-                            dest.outputStream().use { input.copyTo(it) }
-                        } ?: continue
-                        dest.setExecutable(true, false)
+                        ctx.contentResolver.openInputStream(uri)?.use { input -> copyAtomically(input, dest) } ?: continue
+                        stampFile.writeText(stamp.toString())
                     }
                     result.add(EngineInfo("oex:${ai.packageName}/$fileName", title, dest, EngineInfo.Kind.OPEN_EXCHANGE))
                 }
@@ -117,6 +155,8 @@ class EngineRegistry(private val ctx: Context) {
     companion object {
         const val OEX_ACTION = "intent.chess.provider.ENGINE"
         /** Engines shipped in the APK (file name in jniLibs -> title). */
-        val BUNDLED_TITLES = mapOf("libsmotherfish.so" to "Smotherfish (built in)")
+        /** The bundled builds: plain Armv8 and Armv8.2 with dot product (jniLibs, so installed executable). */
+        const val SMOTHERFISH = "libsmotherfish.so"
+        const val SMOTHERFISH_DOTPROD = "libsmotherfish_dotprod.so"
     }
 }

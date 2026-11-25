@@ -19,6 +19,9 @@ object DebugLog {
     private const val MAX_FILE = 512 * 1024L
     private val lines = ArrayDeque<String>()
     private var file: File? = null
+    /** The open log file (opened once, not for every line) and its size. */
+    private var out: java.io.Writer? = null
+    private var size = 0L
     private val fmt = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
     /** The last message written, without its time, and how often it came again since. */
     private var last: String? = null
@@ -28,12 +31,36 @@ object DebugLog {
     @Synchronized
     fun init(dir: File) {
         if (file != null) return
-        val f = File(dir, "debug.log")
-        if (f.length() > MAX_FILE) {
-            File(dir, "debug.log.1").delete()
-            f.renameTo(File(dir, "debug.log.1"))
-        }
         file = File(dir, "debug.log")
+        if (file!!.length() > MAX_FILE) rotate()
+    }
+
+    /** Tests: log to `dir` from now on, whatever init() was given. */
+    @Synchronized
+    internal fun useDir(dir: File) {
+        try { out?.close() } catch (_: Exception) {}
+        out = null
+        file = null
+        init(dir)
+    }
+
+    /** The log file, opened at the first line written to it. */
+    private fun writer(): java.io.Writer? {
+        out?.let { return it }
+        val f = file ?: return null
+        size = f.length()
+        out = try { java.io.BufferedWriter(java.io.FileWriter(f, true), 8192) } catch (_: Exception) { null }
+        return out
+    }
+
+    /** The current file becomes debug.log.1 (the one before goes), and a new one begins. */
+    private fun rotate() {
+        val f = file ?: return
+        try { out?.close() } catch (_: Exception) {}
+        out = null
+        val old = File(f.parentFile, "debug.log.1")
+        old.delete()
+        f.renameTo(old)
     }
 
     fun i(tag: String, msg: String) = add("I", tag, msg)
@@ -58,9 +85,17 @@ object DebugLog {
     private fun write(line: String) {
         lines.addLast(line)
         while (lines.size > MAX_LINES) lines.removeFirst()
+        val w = writer() ?: return
         try {
-            file?.appendText(line + "\n")
+            w.write(line)
+            w.write("\n")
+            // Flushed at once: after a crash the log must hold the lines before it.
+            w.flush()
+            size += line.length + 1
+            if (size > MAX_FILE) rotate()
         } catch (_: Exception) {
+            try { w.close() } catch (_: Exception) {}
+            out = null
         }
     }
 
@@ -87,6 +122,10 @@ object DebugLog {
     fun clear() {
         lines.clear()
         last = null; repeats = 0
-        file?.let { it.delete(); File(it.parentFile, "debug.log.1").delete() }
+        file?.let {
+            try { out?.close() } catch (_: Exception) {}
+            out = null
+            it.delete(); File(it.parentFile, "debug.log.1").delete()
+        }
     }
 }

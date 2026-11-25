@@ -73,7 +73,15 @@ class OverlayService : Service() {
     private lateinit var prefs: Prefs
     private lateinit var wm: WindowManager
     private val main = Handler(Looper.getMainLooper())
-    private val worker = HandlerThread("overlay-worker").apply { start() }
+    private val worker = HandlerThread("overlay-worker").apply {
+        start()
+        // Reading the board runs while the engine searches on most cores: a little ahead of the engine's threads,
+        // so a move is read on time in a fast game. Where the phone refuses, the default stays.
+        Handler(looper).post {
+            runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DISPLAY) }
+                .onFailure { DebugLog.w("Overlay", "reading thread priority unchanged: ${it.message}") }
+        }
+    }
     private val work = Handler(worker.looper)
 
     private var projection: MediaProjection? = null
@@ -221,7 +229,8 @@ class OverlayService : Service() {
         var ready: Analyst? = null
         val host = EngineHost(info.file, reg.workDir, prefs.engineOptions(info.id),
             onUpdate = { u -> ready?.onEngine(u) },
-            onStatus = { s -> ready?.status(s) })
+            onStatus = { s -> ready?.status(s) },
+            defaultHashMb = hashForPhone(), alternative = info.alternative)
         engine = host
         val rec = Recognizer(models.board, models.locator, howToRead(models, host))
         recognizer = rec
@@ -426,12 +435,21 @@ class OverlayService : Service() {
             if (now - lastRead >= FIND_MS && screenStill(now)) read(auto = true)
             return
         }
-        val px = screen?.pixels(pts.first, pts.second) ?: return
+        val s = screen ?: return
+        // No new frame since the last check (Android sends one only when the screen changes): the same pixels,
+        // not read again. The watcher still gets them, as its stillness wait counts on.
+        val px = polled?.takeIf { s.latestTime == polledTime && polledPts === pts.first }
+            ?: (s.pixels(pts.first, pts.second) ?: return).also { polled = it; polledTime = s.latestTime; polledPts = pts.first }
         if (watcher.offer(now, px, tracker, cover(), lastRead) == ChangeWatcher.Decision.READ) {
             DebugLog.i(TAG, "board changed")
             read(auto = true, checkCapture = true)
         }
     }
+
+    /** The board points' pixels at the last check, from the frame that arrived at `polledTime`. */
+    private var polled: IntArray? = null
+    private var polledTime = -1L
+    private var polledPts: Any? = null
 
     // A coarse grid over the whole screen, for "is anything moving?" before a board is known.
     private var gridX: IntArray? = null
@@ -652,6 +670,25 @@ class OverlayService : Service() {
         lp.x = lp.x.coerceIn(0, maxOf(0, screenW - lp.width))
         lp.y = lp.y.coerceIn(0, maxOf(0, screenH - (60 * density).toInt()))
         runCatching { wm.updateViewLayout(v, lp) }
+    }
+
+    /**
+     * The engine's hash unless the user set one: 64 MB is plenty for short
+     * searches, more helps long ones, and a big hash on a small phone gets
+     * the engine killed when memory runs low.
+     */
+    private fun hashForPhone(): Int {
+        val mem = runCatching {
+            android.app.ActivityManager.MemoryInfo().also {
+                getSystemService(android.app.ActivityManager::class.java).getMemoryInfo(it)
+            }.totalMem
+        }.getOrDefault(0L)
+        val gb = mem / (1L shl 30)
+        return when {
+            gb >= 6 -> 256
+            gb >= 3 -> 128
+            else -> 64
+        }
     }
 
     private fun toggleAuto() {

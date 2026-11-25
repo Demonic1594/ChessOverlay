@@ -32,14 +32,25 @@ data class AnalysisUpdate(
  * with safer settings (see [fallback]); the overlay shows what happens.
  */
 class EngineHost(
-    private val executable: File,
+    executable: File,
     private val workDir: File,
     private val options: Map<String, String>,
     private val onUpdate: (AnalysisUpdate) -> Unit,
     private val onStatus: (String) -> Unit,
     private val startTimeoutMs: Long = 30_000,
     private val silentMs: Long = SILENT_MS,
+    /** Hash in MB unless the user set one (the app picks it from the phone's memory). */
+    private val defaultHashMb: Int = 64,
+    /**
+     * Another build of the same engine to use if this one cannot run here
+     * (the faster dotprod build on a CPU without those instructions: it
+     * stops at once, "illegal instruction"). Used from then on.
+     */
+    private var alternative: File? = null,
 ) : AutoCloseable {
+    /** The binary started: `executable`, or `alternative` once that was needed. */
+    @Volatile var executable: File = executable
+        private set
     private val exec = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "engine-host").apply { isDaemon = true } }
     private val ids = AtomicLong(0)
     @Volatile private var engine: UciEngine? = null
@@ -63,6 +74,8 @@ class EngineHost(
     @Volatile var sentOptions: List<String> = emptyList()
         private set
     @Volatile private var firstLinesPending = false
+    /** "ucinewgame" is sent before the next search. */
+    @Volatile private var pendingNewGame = false
 
     private data class Request(val id: Long, val fen: String, val multipv: Int, val movetimeMs: Long)
 
@@ -79,6 +92,12 @@ class EngineHost(
         submit { run(r) }
         return r.id
     }
+
+    /**
+     * A new game begins: the engine is told before the next analysis, so
+     * what it remembers of the last game (its hash) does not steer this one.
+     */
+    fun newGame() { pendingNewGame = true }
 
     fun stop() = submit {
         current = null
@@ -113,6 +132,10 @@ class EngineHost(
         }
         val e = ensureEngine() ?: return
         e.stop()
+        if (pendingNewGame) {
+            pendingNewGame = false
+            if (!e.newGame()) DebugLog.w(TAG, "${e.name}: no readyok after ucinewgame")
+        }
         current = r
         val ok = e.go(r.fen, r.multipv, r.movetimeMs) { lines, finished ->
             if (lines.isNotEmpty() && firstLinesPending) {
@@ -154,7 +177,7 @@ class EngineHost(
             // Checkmate or stalemate: there is no line to give. The overlay is
             // told, so it does not wait for lines (its own rule check may have
             // allowed a move that a picture cannot show to be impossible).
-            DebugLog.i(TAG, "${e.name}: no legal move in $r.fen (${e.bestMoveLine})")
+            DebugLog.i(TAG, "${e.name}: no legal move in ${r.fen} (${e.bestMoveLine})")
             if (r.id == ids.get()) onUpdate(AnalysisUpdate(r.id, r.fen, emptyList(), finished = true, noLegalMove = true))
             return
         }
@@ -212,9 +235,20 @@ class EngineHost(
             e
         } catch (ex: Exception) {
             DebugLog.e(TAG, "could not start ${executable.name}", ex)
+            if (useAlternative("it did not start")) return ensureEngine()
             onStatus("Could not start the engine: ${ex.message}")
             null
         }
+    }
+
+    /** Switches to the other build, once; false if there is none. */
+    private fun useAlternative(why: String): Boolean {
+        val alt = alternative ?: return false
+        alternative = null
+        DebugLog.w(TAG, "${executable.name}: $why; using ${alt.name} instead")
+        executable = alt
+        restartTimes.clear()
+        return true
     }
 
     /** Sends the options; returns them as "name=value" for the log. */
@@ -223,7 +257,7 @@ class EngineHost(
         // Sensible defaults for a phone unless the user set them.
         val defaults = mapOf(
             "Threads" to maxOf(1, minOf(4, cores / 2)).toString(),
-            "Hash" to "64",
+            "Hash" to defaultHashMb.toString(),
         )
         val all = LinkedHashMap<String, String>()
         for ((k, v) in defaults) if (options.keys.none { it.equals(k, true) }) all[k] = v
@@ -241,8 +275,18 @@ class EngineHost(
         val r = current
         DebugLog.e(TAG, "engine exited (code $code) while analysing ${r?.fen ?: "nothing"}; " +
             "last output: ${dead.outputTail().takeLast(8).joinToString(" | ")}")
-        if (r != null) crashesByFen[r.fen] = (crashesByFen[r.fen] ?: 0) + 1
-        onStatus("Engine stopped (code $code); restarting…")
+        if (r != null) {
+            // Only the positions of this session that crashed it; kept small.
+            if (crashesByFen.size >= 64) crashesByFen.clear()
+            crashesByFen[r.fen] = (crashesByFen[r.fen] ?: 0) + 1
+        }
+        // Killed by "illegal instruction" (SIGILL: 128 + 4, or 4 where the signal itself is given): a build this
+        // CPU cannot run, not a crash to retry.
+        if ((code == SIGILL_EXIT || code == SIGILL) && useAlternative("illegal instruction (exit code $code)")) {
+            crashesByFen.clear()
+        } else {
+            onStatus("Engine stopped (code $code); restarting…")
+        }
         // Resume the request that was running, unless a newer one is queued.
         if (r != null && r.id == ids.get()) run(r) else ensureEngine()
     }
@@ -252,5 +296,7 @@ class EngineHost(
         /** No search output this long after "go" = a silent engine. */
         const val SILENT_MS = 6_000L
         private const val MAX_FALLBACK = 3
+        private const val SIGILL = 4
+        private const val SIGILL_EXIT = 128 + SIGILL
     }
 }

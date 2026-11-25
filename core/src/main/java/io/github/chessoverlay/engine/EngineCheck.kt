@@ -15,17 +15,18 @@ object EngineCheck {
     data class Report(val ok: Boolean, val text: String)
 
     fun run(executable: File, workDir: File, options: Map<String, String>, seconds: Int = 5,
-            giveUpMs: Long = 45_000): Report {
+            giveUpMs: Long = 45_000, alternative: File? = null): Report {
         val updates = CopyOnWriteArrayList<Pair<Long, AnalysisUpdate>>()
         val status = CopyOnWriteArrayList<String>()
         val t0 = System.currentTimeMillis()
         DebugLog.i(TAG, "testing ${executable.name} with ${options.size} saved options")
         val host = EngineHost(executable, workDir, options,
             onUpdate = { updates.add(System.currentTimeMillis() to it) },
-            onStatus = { status.add(it) })
+            onStatus = { status.add(it) }, alternative = alternative)
         var name: String
         var fallback: Int
         var sent: List<String>
+        var used: File
         host.use {
             val id = host.analyse(FEN, 3, 0)
             while (true) {
@@ -39,11 +40,13 @@ object EngineCheck {
             name = host.engineName
             fallback = host.fallback
             sent = host.sentOptions
+            used = host.executable
         }
         val first = updates.firstOrNull { it.second.lines.isNotEmpty() }
         val last = updates.lastOrNull { it.second.lines.isNotEmpty() }?.second
         val sb = StringBuilder()
         sb.append(name).append('\n')
+        if (alternative != null && used != executable) sb.append("The faster build cannot run on this phone; ${used.name} was used.\n")
         val ok = first != null && last != null
         if (ok) {
             val top = last!!.lines[0]

@@ -58,7 +58,8 @@ class MainActivity : AppCompatActivity() {
     /** Follows the overlay while the screen shows: the last position changes as the game goes on. */
     private val live = object : Runnable {
         override fun run() {
-            showPosition()
+            // Only when the overlay saw a new position: rebuilding the card every time made it flicker and lose taps.
+            if (OverlayService.lastPosition !== lastShown) showLast()
             main.postDelayed(this, LIVE_MS)
         }
     }
@@ -156,9 +157,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** The position shown by showLast(). */
+    private var lastShown: Any? = null
+
     /** The position the overlay saw last (its board with the engine's arrows, its FEN and line), and the kept ones. */
     private fun showPosition() {
+        showLast()
+        showKept()
+    }
+
+    private fun showLast() {
         val p = OverlayService.lastPosition
+        lastShown = p
         val board = p?.let { try { Board.fromPlacement(it.fen.split(' ')[0]) } catch (_: Exception) { null } }
         val has = p != null && board != null
         findViewById<View>(R.id.positionActions).visibility = if (has) View.VISIBLE else View.GONE
@@ -178,7 +188,10 @@ class MainActivity : AppCompatActivity() {
             detail.text = "The overlay's last position appears here."
             preview.shown = null
         }
-        // The positions kept: one row each, and what to do with all of them.
+    }
+
+    /** The positions kept: one row each, and what to do with all of them. */
+    private fun showKept() {
         val kept = KeptPositions.all(this)
         val list = findViewById<android.widget.LinearLayout>(R.id.kept)
         list.removeAllViews()
@@ -335,7 +348,7 @@ class MainActivity : AppCompatActivity() {
             .show()
         thread(name = "engine-test") {
             val report = try {
-                EngineCheck.run(e.file, registry.workDir, prefs.engineOptions(e.id))
+                EngineCheck.run(e.file, registry.workDir, prefs.engineOptions(e.id), alternative = e.alternative)
             } catch (ex: Exception) {
                 DebugLog.e("EngineCheck", "test failed", ex)
                 EngineCheck.Report(false, "The test failed: ${ex.message}")

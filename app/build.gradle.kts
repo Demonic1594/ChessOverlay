@@ -21,8 +21,10 @@ android {
         // Open Exchange engine apps) depends on that, as in DroidFish.
         // Such an app can be sideloaded but not published on Google Play.
         targetSdk = 28
-        versionCode = 1
-        versionName = "0.1.0"
+        // Each CI build is numbered, so an APK from a later build installs over an earlier one.
+        val build = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+        versionCode = build ?: 1
+        versionName = "0.1.0" + (build?.let { "+$it" } ?: "")
         // Phones are arm64; emulator tests in CI add x86_64 (-PextraAbi=x86_64).
         ndk {
             abiFilters += listOf("arm64-v8a")

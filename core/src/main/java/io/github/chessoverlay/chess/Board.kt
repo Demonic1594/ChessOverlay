@@ -301,10 +301,14 @@ class Board private constructor(
      */
     fun legalMoves(white: Boolean): List<String> {
         val out = ArrayList<String>()
+        val targets = IntArray(32)
         for (from in 0..63) {
             val p = sq[from]
             if (p == '.' || p.isUpperCase() != white) continue
-            for (to in 0..63) {
+            // Only the squares this piece could reach at all (the same moves, in the same order, as trying all 64).
+            val n = candidates(from, p, targets)
+            for (i in 0 until n) {
+                val to = targets[i]
                 if (!canMove(from, to)) continue
                 if (p.lowercaseChar() == 'k' && kotlin.math.abs(to - from) == 2) {
                     // Castling: the right must still be there (the king and that
@@ -327,6 +331,39 @@ class Board private constructor(
             }
         }
         return out
+    }
+
+    /**
+     * Every square the piece `p` on `from` might move to by its way of
+     * moving, ascending, into `out` (canMove() decides): a few dozen at most
+     * instead of 64. Returns how many.
+     */
+    private fun candidates(from: Int, p: Char, out: IntArray): Int {
+        var n = 0
+        val f = from % 8
+        val r = from / 8
+        fun add(file: Int, rank: Int) { if (file in 0..7 && rank in 0..7) out[n++] = rank * 8 + file }
+        fun ray(df: Int, dr: Int) {
+            var x = f + df; var y = r + dr
+            while (x in 0..7 && y in 0..7) {
+                out[n++] = y * 8 + x
+                if (sq[y * 8 + x] != '.') break
+                x += df; y += dr
+            }
+        }
+        when (p.lowercaseChar()) {
+            'p' -> {
+                val dir = if (p.isUpperCase()) 1 else -1
+                add(f, r + dir); add(f, r + 2 * dir); add(f - 1, r + dir); add(f + 1, r + dir)
+            }
+            'n' -> for ((df, dr) in KNIGHT) add(f + df, r + dr)
+            'k' -> { for ((df, dr) in KING) add(f + df, r + dr); add(f + 2, r); add(f - 2, r) }
+            'b' -> for ((df, dr) in BISHOP_DIRS) ray(df, dr)
+            'r' -> for ((df, dr) in ROOK_DIRS) ray(df, dr)
+            'q' -> { for ((df, dr) in ROOK_DIRS) ray(df, dr); for ((df, dr) in BISHOP_DIRS) ray(df, dr) }
+        }
+        java.util.Arrays.sort(out, 0, n)
+        return n
     }
 
     /** Whether `white` may still castle to the side `kingside` (O-O, not O-O-O). */
@@ -371,6 +408,8 @@ class Board private constructor(
     }
 
     companion object {
+        /** The pieces of a new game. */
+        const val START_PLACEMENT = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
         private val KNIGHT = listOf(1 to 2, 2 to 1, -1 to 2, -2 to 1, 1 to -2, 2 to -1, -1 to -2, -2 to -1)
         private val KING = listOf(1 to 0, -1 to 0, 0 to 1, 0 to -1, 1 to 1, 1 to -1, -1 to 1, -1 to -1)
         private val ROOK_DIRS = listOf(1 to 0, -1 to 0, 0 to 1, 0 to -1)
