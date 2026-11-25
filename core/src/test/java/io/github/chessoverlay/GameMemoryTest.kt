@@ -115,4 +115,23 @@ class GameMemoryTest {
         val ok = see(t, played)
         assertEquals("h5f3", (ok as BoardTracker.Result.Position).move)
     }
+
+    /**
+     * A premove shown on the board (chess.com draws the piece on its new square before its turn): not played.
+     * The position stays; when the other side replies, the reply and the premove are read as a move each.
+     */
+    @Test fun aPremoveIsHeldUntilTheReply() {
+        val (t, b) = play("e2e4", "e7e5", "g1f3")   // Black to move
+        val shown = after(b, "f1c4")                 // White premoves Bc4 while Black thinks
+        val r = see(t, shown)
+        assertTrue("held, not a move: $r", r is BoardTracker.Result.Same)
+        assertEquals(b.placement(), t.board!!.placement())
+        assertTrue("still Black to move", !t.whiteToMove)
+        // Black replies, and the premove is played at once.
+        val both = after(b, "b8c6", "f1c4")
+        val r2 = see(t, both)
+        assertTrue("$r2", r2 is BoardTracker.Result.Position)
+        assertEquals(both.placement(), t.board!!.placement())
+        assertTrue("Black to move again", !t.whiteToMove)
+    }
 }
