@@ -98,4 +98,21 @@ class GameMemoryTest {
         // After the first move the side follows the game: White to move after Black's moves and so on.
         assertEquals("the side is right from the second move on: $sides", listOf(false, true, false), sides.drop(1))
     }
+
+    /**
+     * The square a piece just went to read as empty (something drawn over it): every move of that piece to an
+     * empty square fits the reading as well. None is taken; the last position stays until a reading tells.
+     */
+    @Test fun aTieBetweenMovesIsNotGuessed() {
+        val (t, b) = play("e2e4", "d7d5", "d1h5", "d5d4")
+        // White's queen h5 -> f3 (both empty squares before), read with f3 empty, as if covered.
+        val played = after(b, "h5f3")
+        val covered = played.with(io.github.chessoverlay.chess.Board.squareOf("f3") to '.')
+        val r = t.accept(img, rec(covered, 0.99f), null, strict = true)
+        assertTrue("held: $r", r is BoardTracker.Result.Invalid && r.again)
+        assertEquals("the game stays where it was", b.placement(), t.board!!.placement())
+        // Read clearly: the move is taken.
+        val ok = see(t, played)
+        assertEquals("h5f3", (ok as BoardTracker.Result.Position).move)
+    }
 }

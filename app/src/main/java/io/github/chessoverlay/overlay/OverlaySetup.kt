@@ -27,6 +27,9 @@ object OverlaySetup {
             DebugLog.w(TAG, "the app went away while reading with $died; ${RecognizerMode.DEFAULT} is used from now on")
             saved = RecognizerMode.DEFAULT
             prefs.recognizerMode = null
+            // Measured again at this start: the app may have gone away for another reason (a crash elsewhere,
+            // a force stop), and the way found fastest should not be lost for good.
+            prefs.recognizerTuned = false
         }
         prefs.recognizerInUse = null
         if (prefs.recognizerTuned) return saved

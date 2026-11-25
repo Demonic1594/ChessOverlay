@@ -302,4 +302,29 @@ class EngineHostTest {
             dir.deleteRecursively()
         }
     }
+
+    /** An engine that answers "uci" but never "isready": each start that fails is not left running. */
+    @Test fun anEngineThatIsNeverReadyIsNotLeftRunning() {
+        val dir = createTempDir("unready")
+        val pids = File(dir, "pids")
+        val bin = script(dir, "unready.sh", """
+            echo ${'$'}${'$'} >> "${pids.absolutePath}"
+            while read -r line; do
+              case "${'$'}line" in
+                uci) echo "id name Unready"; echo uciok ;;
+                quit) exit 0 ;;
+              esac
+            done
+        """)
+        EngineHost(bin, dir, emptyMap(), onUpdate = {}, onStatus = {}).use { host ->
+            host.analyse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 1, 0)
+            Thread.sleep(7_000)
+        }
+        Thread.sleep(500)
+        val started = pids.readLines().filter { it.isNotBlank() }
+        assertTrue("it was started", started.isNotEmpty())
+        val alive = started.filter { File("/proc/$it").exists() }
+        assertTrue("none left running: $alive of $started", alive.isEmpty())
+        dir.deleteRecursively()
+    }
 }

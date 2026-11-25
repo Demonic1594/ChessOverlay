@@ -209,7 +209,12 @@ class EngineHost(
     private fun silent(r: Request, e: UciEngine, why: String) {
         DebugLog.w(TAG, "${e.name} $why; since go: ${e.sinceGoText()}")
         if (fallback >= MAX_FALLBACK) {
+            // No safer settings left: still a new process (as configured last), never the hung one kept. The
+            // limit of starts a minute keeps this from looping.
             onStatus("The engine gives no lines; please send Copy debug log")
+            engine = null
+            e.kill()
+            ensureEngine()
             return
         }
         fallback++
@@ -261,6 +266,7 @@ class EngineHost(
             // The other build only when this one cannot run here: it could not be started at all, or it was killed
             // by "illegal instruction". Not for a passing failure (low memory, a slow start): the faster build
             // would be given up for the whole session.
+            starting?.kill()   // started but not ready: not left running
             val code = starting?.exitCode
             val cannotRun = ex is java.io.IOException || code == SIGILL_EXIT || code == SIGILL
             if (cannotRun && useAlternative("it did not start (${code?.let { "exit code $it" } ?: ex.javaClass.simpleName})"))

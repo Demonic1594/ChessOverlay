@@ -327,6 +327,11 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
         val backTo = plainRead?.takeIf { p ->
             decoded != null && p.placement() != decoded.board.placement() && history.any { it.placement == p.placement() }
         }
+        // Two moves explain the reading equally well: which one is not known yet. The last position stays (and
+        // its analysis) until a reading tells them apart, rather than the first of them being taken.
+        if (backTo == null && decoded != null && decoded.ambiguous && strict && sideOverride == null) {
+            return Result.Invalid("two moves explain it equally; reading again", again = true)
+        }
         val useDecoded = if (backTo != null) null else decoded
         val read = useDecoded?.board ?: plainRead ?: return Result.Invalid("bad board")
         // The site's last-move highlight says who moved last, when it is clear.

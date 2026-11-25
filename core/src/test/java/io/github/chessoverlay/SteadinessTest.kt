@@ -47,6 +47,20 @@ class SteadinessTest {
         assertEquals(1, PvCollector(1).add(pv(1, 1, "e2e4"))!!.size)
     }
 
+    /** An engine that prints its lines one at a time, slower than the flush: every rank is still shown. */
+    @Test fun linesPrintedOneAtATime() {
+        val c = PvCollector(3)
+        c.add(pv(1, 10, "e2e4")); val a = c.flush()!!
+        c.add(pv(2, 10, "d2d4")); val b = c.flush()!!
+        c.add(pv(3, 10, "c2c4")); val d = c.flush()!!
+        assertEquals(listOf(1), a.map { it.multipv })
+        assertEquals(listOf(1, 2), b.map { it.multipv })
+        assertEquals(listOf(1, 2, 3), d.map { it.multipv })
+        // The next iteration's first line replaces rank 1 and keeps the others until theirs come.
+        c.add(pv(1, 11, "g1f3")); val e = c.flush()!!
+        assertEquals(listOf("g1f3", "d2d4", "c2c4"), e.map { it.pv[0] })
+    }
+
     @Test fun movesFollowHowPiecesMove() {
         val b = Board.fromPlacement("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR")
         assertTrue(b.canMove(Board.squareOf("e2"), Board.squareOf("e4")))

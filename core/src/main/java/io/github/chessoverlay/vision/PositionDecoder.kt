@@ -38,7 +38,15 @@ object PositionDecoder {
     /** Turning the board round must explain clearly more than keeping it. */
     private const val FLIP_COST = 2.0
 
-    class Reading(val board: Board, val blackAtBottom: Boolean, val moves: List<String>)
+    /**
+     * `ambiguous`: another position the game can reach explains the reading
+     * about as well (a piece's new square read as empty fits every move of
+     * it to an empty square). Then which move it was is not known yet.
+     */
+    class Reading(val board: Board, val blackAtBottom: Boolean, val moves: List<String>, val ambiguous: Boolean = false)
+
+    /** Two explanations closer than this (log) are a tie. */
+    private const val TIE = 1.0
 
     fun decode(prev: Board, whiteToMove: Boolean, blackAtBottom: Boolean, rec: Recognition,
                tau: Double = TAU_FOLLOWING): Reading? {
@@ -49,6 +57,8 @@ object PositionDecoder {
 
         var best: Reading? = null
         var bestL = Double.NEGATIVE_INFINITY
+        // The best explanation of another position than the best one (for ties).
+        var secondL = Double.NEGATIVE_INFINITY
         for (black in listOf(blackAtBottom, !blackAtBottom)) {
             val cost = if (black == blackAtBottom) 0.0 else FLIP_COST
             fun score(b: Board): Double {
@@ -58,7 +68,13 @@ object PositionDecoder {
             }
             fun offer(b: Board, moves: List<String>) {
                 val l = score(b)
-                if (l > bestL) { bestL = l; best = Reading(b, black, moves) }
+                val sameAsBest = best?.let { it.board.placement() == b.placement() && it.blackAtBottom == black } ?: false
+                if (l > bestL) {
+                    if (!sameAsBest) secondL = bestL
+                    bestL = l; best = Reading(b, black, moves)
+                } else if (l > secondL && !sameAsBest) {
+                    secondL = l
+                }
             }
             offer(prev, emptyList())
             for (white in listOf(whiteToMove, !whiteToMove)) {
@@ -78,7 +94,8 @@ object PositionDecoder {
             val d = drawnIndex(sq, r.blackAtBottom)
             if (logp[d].max() - logp[d][Fen.classOf(r.board[sq])] > SURE_DISAGREEMENT) sure++
         }
-        return r.takeIf { sure <= 1 }
+        if (sure > 1) return null
+        return if (bestL - secondL < TIE) Reading(r.board, r.blackAtBottom, r.moves, ambiguous = true) else r
     }
 
     /** Index (top-left first) of `square` (a1 = 0) on a board drawn with `black` at the bottom. */

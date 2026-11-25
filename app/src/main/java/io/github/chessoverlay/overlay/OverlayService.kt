@@ -436,8 +436,9 @@ class OverlayService : Service() {
     private fun captureBoard(then: (Img?) -> Unit) {
         val region = analyst?.board?.region()
         val c = windows.cardRect
-        val hideCard = c != null && region != null &&
-            c[0] < region[2] && c[2] > region[0] && c[1] < region[3] && c[3] > region[1]
+        // With no board known (looking for it) the card may lie over it anywhere: hidden then too.
+        val hideCard = c != null && (region == null ||
+            c[0] < region[2] && c[2] > region[0] && c[1] < region[3] && c[3] > region[1])
         holdDrawing = true
         main.post {
             // A frame captured in the last moment may still show the drawing: then a newer one is waited for.
