@@ -206,7 +206,8 @@ class MainActivity : AppCompatActivity() {
             .setTitle("ChessOverlay")
             .setMessage(listOf(
                 "START",
-                "Start overlay, allow the screen capture, then open the app with the board: the board is read, " +
+                "Start overlay, allow the screen capture (on Android 14 and later, sharing a single app, your chess app, " +
+                "is best: the overlay's arrows are then not in what it reads), then open the app with the board: the board is read, " +
                     "and the engine's moves are drawn over it. Android asks to allow the capture each time.",
                 "The chips above the button are what the overlay needs: the recognition models, permission to draw " +
                     "over other apps, and an engine. An amber one is tapped to set it right. Next to the engine, the arrows " +

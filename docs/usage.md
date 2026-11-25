@@ -22,6 +22,8 @@ Below the chips is the engine, on one line: its name and where it came from, a b
 
 Tap **Start overlay** and allow screen capture. Android asks for that permission at every start. The overlay then runs as a foreground service, with a notification, until it is closed from its card or stopped from the app.
 
+On Android 14 and later, Android may ask whether to share the **entire screen** or **a single app**. Choosing **a single app** and picking your chess app is the better choice: the overlay's own arrows and card are then not part of what it reads, so it reads the board as it is, without taking its drawing off first (faster, and nothing blinks). The overlay checks which one it got when it starts (a small magenta square shows for a moment) and works either way. With a single app shared, it sees only that app: switch to another app and the board is "gone" until you come back.
+
 Switch to the app with the board. The overlay finds the board, reads it and starts analysing; with auto mode on, it follows the game from there.
 
 ## The floating card
