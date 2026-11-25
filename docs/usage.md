@@ -87,9 +87,10 @@ The board in the position card is drawn with the arrow settings, with a sample p
 ## Engines
 
 - **Built in.** Smotherfish, a Stockfish-based engine, is part of the APK that CI builds.
-- **An engine file.** Any arm64 UCI engine binary can be added with **+** next to the engine: Stockfish, Komodo, lc0 with a Maia network set as its `WeightsFile`. The file is copied into the app.
+- **An engine file.** Any arm64 UCI engine binary can be added with **+** next to the engine: Stockfish, Komodo, lc0 with a Maia network set as its `WeightsFile`. The file is copied into the app. **Remove…** in the engine list deletes an engine file you added, with its saved options (the built-in engine stays; an engine app's engines go when that app is uninstalled).
 - **Engine apps.** Apps that offer engines to chess GUIs over the Open Exchange protocol, as DroidFish uses, are found by themselves.
-- **Options.** The sliders button opens every UCI option the engine declares, grouped into Strength, Smotherfish, Performance and Other. `UCI_LimitStrength` with `UCI_Elo`, and Smotherfish's `Analysis Elo` and `Smother*` options, are among them. The options are kept per engine.
+- **Options.** The sliders button opens every UCI option the engine declares, grouped into Strength, Smotherfish, Performance and Other. `UCI_LimitStrength` with `UCI_Elo`, and Smotherfish's `Analysis Elo` and `Smother*` options, are among them. The options are kept per engine. The engine is started to read its options the first time only; after that the screen opens at once (a new version of the engine file is read again).
+- **Win, draw and loss.** Where the engine gives them (`UCI_ShowWDL`, asked for unless you set it), the card shows White's chances after the depth, as `W62 D30 L8` (per cent).
 
 An engine that supports `MultiPV` is asked for as many lines as the *Lines* setting; otherwise it gives one.
 
@@ -108,6 +109,7 @@ An engine that supports `MultiPV` is asked for as many lines as the *Lines* sett
 | Copy the debug log | Copies the log to the clipboard. It holds the last 600 lines: every read with its timing and what it found, and every engine event. Every 25 positions and when the overlay closes, a `session:` line sums up the session: moves seen at once from the changed squares and how many the recognizer confirmed or corrected, the reads' median and 90th-percentile times, the side to move taken from the highlight, misreads. |
 | Share the last misread screen | Shares the screen of the last misread, as the app saw it. A screen is kept only when a board was read wrongly twice in a row. |
 | Clear the log | Empties the debug log. |
+| Check for a new version | Looks up the latest release on GitHub now (otherwise it is done at most once a day, unless **Look for new versions** is off) and offers it if it is newer: downloaded, checked against the release's SHA-256, then installed by Android's installer after you confirm. |
 
 ### Reporting a problem
 
@@ -115,7 +117,7 @@ For a position that was read wrong, send **Share the last misread screen** and *
 
 ## Privacy
 
-Screen captures are processed on the device and are not uploaded. One capture is kept, locally, when a board was read wrongly, and it leaves the phone only if you share it yourself. The app uses the network for two things only: downloading the recognition models (in builds that do not carry them), and opening a position on lichess.org in your browser when you ask for it.
+Screen captures are processed on the device and are not uploaded. One capture is kept, locally, when a board was read wrongly, and it leaves the phone only if you share it yourself. The app uses the network for three things only: downloading the recognition models (in builds that do not carry them; the download is checked against the release's SHA-256), opening a position on lichess.org in your browser when you ask for it, and looking up the latest version on GitHub Releases at most once a day (it sends nothing about you or your phone; turn it off under **Look for new versions**). A new version is downloaded only when you choose to, checked against the release's SHA-256, and installed by Android's installer after you confirm.
 
 ## What a picture cannot tell
 

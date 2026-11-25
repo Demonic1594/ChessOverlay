@@ -107,8 +107,13 @@ object CardLayer {
             val ds = 12 * d
             // What is known of the game: the depth, then how often the position
             // came up and the move's number, as far as the card is wide.
+            // The engine's win/draw/loss chances (per mille, for the side to move), from White's side as the score.
+            val wdl = top.wdl?.let { (w, dr, l) ->
+                val (a, b, c3) = if (s.whiteToMove) Triple(w, dr, l) else Triple(l, dr, w)
+                "W${(a + 5) / 10} D${(b + 5) / 10} L${(c3 + 5) / 10}"
+            }
             var parts = listOf("d${top.depth}") + listOfNotNull(
-                if (s.repetitions > 1) "×${s.repetitions}" else null, s.moveNumber?.let { "$it." })
+                wdl, if (s.repetitions > 1) "×${s.repetitions}" else null, s.moveNumber?.let { "$it." })
             val space = m.width(" ", ds, false)
             val free = right - x - buttons.size * minButton - 18 * d
             while (parts.size > 1 &&

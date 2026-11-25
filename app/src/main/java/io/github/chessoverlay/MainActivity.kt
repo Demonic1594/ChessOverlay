@@ -103,6 +103,67 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         refresh()
         main.post(live)
+        if (Updates.due(prefs)) lookForUpdate(byHand = false)
+    }
+
+    // ---- new versions ------------------------------------------------------
+
+    /** Looks up the latest release; offers it when newer (by hand: says so when there is none). */
+    private fun lookForUpdate(byHand: Boolean) {
+        prefs.lastUpdateCheck = System.currentTimeMillis()
+        thread {
+            val r = try { Updates.latestNewer(this) } catch (e: Exception) {
+                DebugLog.w("Updates", "could not look up the latest release: ${e.message}")
+                if (byHand) runOnUiThread { toast("Could not look for updates: ${e.message}") }
+                return@thread
+            }
+            runOnUiThread {
+                if (isFinishing) return@runOnUiThread
+                if (r == null) { if (byHand) toast("This is the latest version") } else offerUpdate(r)
+            }
+        }
+    }
+
+    private fun offerUpdate(r: Updates.Release) {
+        val mb = if (r.apkSize > 0) " (${r.apkSize / 1_000_000} MB)" else ""
+        MaterialAlertDialogBuilder(this)
+            .setTitle("ChessOverlay ${r.tag.removePrefix("v")} is out")
+            .setMessage("You have ${Updates.currentVersion(this)}. Download the new version$mb and install it? " +
+                "The file is checked against the release's SHA-256 before it is installed; your settings stay.")
+            .setPositiveButton("Download") { _, _ -> downloadUpdate(r) }
+            .setNeutralButton("What's new") { _, _ ->
+                try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(r.page))) } catch (_: Exception) { toast("No browser found") }
+            }
+            .setNegativeButton("Later", null)
+            .show()
+    }
+
+    private fun downloadUpdate(r: Updates.Release) {
+        if (!Updates.canInstall(this)) {
+            // Android asks once whether this app may hand APKs to its installer.
+            toast("Allow ChessOverlay to install apps, then tap Download again")
+            try {
+                startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            } catch (_: Exception) {}
+            main.postDelayed({ offerUpdate(r) }, 1500)
+            return
+        }
+        val text = TextView(this).apply { setPadding(64, 32, 64, 0); text = "Downloading…" }
+        val dialog = MaterialAlertDialogBuilder(this).setTitle("New version").setView(text).setCancelable(false).show()
+        thread {
+            try {
+                var shown = -1
+                val apk = Updates.download(this, r) { done, total ->
+                    val pct = if (total > 0) (done * 100 / total).toInt() else -1
+                    if (pct != shown) { shown = pct; runOnUiThread { text.text = if (pct >= 0) "Downloading… $pct%" else "Downloading… ${done / 1_000_000} MB" } }
+                }
+                DebugLog.i("Updates", "downloaded and checked ${apk.name}")
+                runOnUiThread { dialog.dismiss(); Updates.install(this, apk) }
+            } catch (e: Exception) {
+                DebugLog.e("Updates", "update failed", e)
+                runOnUiThread { dialog.dismiss(); toast("Update failed: ${e.message}") }
+            }
+        }
     }
 
     override fun onPause() {
@@ -175,6 +236,8 @@ class MainActivity : AppCompatActivity() {
             prefs.cardX = -1; prefs.cardY = -1
             toast("The card will follow the board again")
         }
+        r.subhead("App")
+        r.switch("Look for new versions", "Once a day, on GitHub; you choose whether to install", prefs.updateCheck) { prefs.updateCheck = it }
         updatePreview()
     }
 
@@ -198,6 +261,7 @@ class MainActivity : AppCompatActivity() {
             DebugLog.clear()
             toast("Log cleared")
         }
+        r.action(R.drawable.ic_restore, "Check for a new version", null) { lookForUpdate(byHand = true) }
     }
 
     /** What is on the screen and what it does, for anyone who wants to know. */
@@ -326,12 +390,45 @@ class MainActivity : AppCompatActivity() {
     private fun pickEngine() {
         if (engines.isEmpty()) { toast("No engines found yet"); return }
         val current = engines.indexOfFirst { it.id == prefs.engineId }.coerceAtLeast(0)
+        val removable = engines.filter { it.kind == EngineInfo.Kind.IMPORTED }
         MaterialAlertDialogBuilder(this)
             .setTitle("Engine")
             .setSingleChoiceItems(engines.map { it.title }.toTypedArray(), current) { d, i ->
                 prefs.engineId = engines[i].id
                 d.dismiss()
                 refresh()
+            }
+            .setNegativeButton("Cancel", null)
+            .apply { if (removable.isNotEmpty()) setNeutralButton("Remove…") { _, _ -> removeEngine(removable) } }
+            .show()
+    }
+
+    /**
+     * Removes an engine file the user added (the built-in one stays; an Open Exchange engine goes with its app,
+     * uninstalled in Android's settings). Its saved options go with it; if it was in use, the built-in one is.
+     */
+    private fun removeEngine(removable: List<EngineInfo>) {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Remove an engine")
+            .setItems(removable.map { it.title }.toTypedArray()) { _, i ->
+                val e = removable[i]
+                MaterialAlertDialogBuilder(this)
+                    .setMessage("Remove ${e.title}? Its file and its saved options are deleted.")
+                    .setNegativeButton("Keep it", null)
+                    .setPositiveButton("Remove") { _, _ ->
+                        try {
+                            registry.delete(e)
+                            prefs.clearEngineOptions(e.id)
+                            if (prefs.engineId == e.id) prefs.engineId = engines.firstOrNull { it.kind == EngineInfo.Kind.BUNDLED }?.id ?: "bundled:libsmotherfish.so"
+                            DebugLog.i("Engines", "removed ${e.title}")
+                            toast("Removed")
+                        } catch (ex: Exception) {
+                            DebugLog.e("Engines", "could not remove ${e.title}", ex)
+                            toast("Could not remove it: ${ex.message}")
+                        }
+                        loadEngines()
+                    }
+                    .show()
             }
             .setNegativeButton("Cancel", null)
             .show()

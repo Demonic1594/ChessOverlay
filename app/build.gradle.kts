@@ -27,7 +27,7 @@ android {
         // A release build (a v* tag) is named after its tag; others after the version they lead to, and the run.
         val tag = System.getenv("RELEASE_TAG")?.takeIf { it.startsWith("v") }
             ?: System.getenv("GITHUB_REF_NAME")?.takeIf { System.getenv("GITHUB_REF_TYPE") == "tag" && it.startsWith("v") }
-        versionName = tag?.removePrefix("v") ?: ("0.1.0" + (build?.let { "+$it" } ?: ""))
+        versionName = tag?.removePrefix("v") ?: ("0.2.0" + (build?.let { "+$it" } ?: ""))
         // Phones are arm64; emulator tests in CI add x86_64 (-PextraAbi=x86_64).
         ndk {
             abiFilters += listOf("arm64-v8a")

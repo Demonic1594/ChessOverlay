@@ -9,6 +9,7 @@ import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.progressindicator.LinearProgressIndicator
 import io.github.chessoverlay.engine.EngineRegistry
+import io.github.chessoverlay.engine.OptionsCache
 import io.github.chessoverlay.engine.UciEngine
 import io.github.chessoverlay.engine.UciOption
 import io.github.chessoverlay.ui.Rows
@@ -37,6 +38,12 @@ class EngineOptionsActivity : AppCompatActivity() {
             val info = reg.all().firstOrNull { it.id == id } ?: reg.all().firstOrNull()
             if (info == null) { runOnUiThread { done("No engine found") }; return@thread }
             runOnUiThread { findViewById<TextView>(R.id.engineName).text = info.title }
+            // Read once and kept: the screen opens at once after the first time (a new engine file is read again).
+            val cache = OptionsCache(java.io.File(cacheDir, "engine-options"))
+            cache.get(info.file)?.let { c ->
+                runOnUiThread { build(info.id, c.name, c.options) }
+                return@thread
+            }
             try {
                 // The faster build may not run on this CPU: then the other one is asked.
                 val e = try {
@@ -48,6 +55,7 @@ class EngineOptionsActivity : AppCompatActivity() {
                 val opts = e.options.toList()
                 val name = e.name
                 e.quit()
+                cache.put(info.file, name, opts)
                 runOnUiThread { build(info.id, name, opts) }
             } catch (ex: Exception) {
                 runOnUiThread {

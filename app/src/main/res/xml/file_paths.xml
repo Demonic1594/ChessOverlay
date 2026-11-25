@@ -2,4 +2,6 @@
 <paths>
     <!-- Shared from the tools: the last screen a read failed on. -->
     <files-path name="debug" path="debug/" />
+    <!-- A new version, downloaded and checked, for Android's installer. -->
+    <cache-path name="updates" path="updates/" />
 </paths>

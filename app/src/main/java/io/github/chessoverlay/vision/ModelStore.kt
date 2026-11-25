@@ -62,6 +62,8 @@ class ModelStore(private val ctx: Context) {
             check(conn.responseCode == 200) { "download failed: HTTP ${conn.responseCode}" }
             val total = conn.contentLengthLong
             var done = 0L
+            // The download is checked against the release's SHA-256 as it comes in: a broken or altered file is
+            // never used (ONNX Runtime would load a truncated model, or run one that is not chessimg2pos's).
             val counting = object : java.io.FilterInputStream(conn.inputStream) {
                 override fun read(b: ByteArray, off: Int, len: Int): Int {
                     val n = super.read(b, off, len)
@@ -69,15 +71,8 @@ class ModelStore(private val ctx: Context) {
                     return n
                 }
             }
-            ZipInputStream(counting.buffered()).use { zip ->
-                while (true) {
-                    val e = zip.nextEntry ?: break
-                    val name = File(e.name).name
-                    if (!e.isDirectory && name.endsWith(".onnx")) {
-                        File(tmp, name).outputStream().use { zip.copyTo(it) }
-                    }
-                }
-            }
+            val got = ModelZip.unpack(counting, tmp)
+            check(got == ZIP_SHA256) { "the download is not the expected file (SHA-256 $got); try again" }
             check(File(tmp, "board.onnx").length() > 0 && File(tmp, "locator.onnx").length() > 0) {
                 "board.onnx / locator.onnx not found in the download"
             }
@@ -90,6 +85,8 @@ class ModelStore(private val ctx: Context) {
 
     companion object {
         const val VERSION = "0.2.0"
+        /** SHA-256 of chessimg2pos-v2-onnx.zip of release v0.2.0. */
+        const val ZIP_SHA256 = "920df90f3192cdcb8cd2e167ae1c54124d8cf54263ddf4b894b43534420fdb05"
         const val URL_ZIP = "https://github.com/mdicio/chessimg2pos/releases/download/v$VERSION/chessimg2pos-v2-onnx.zip"
     }
 }
