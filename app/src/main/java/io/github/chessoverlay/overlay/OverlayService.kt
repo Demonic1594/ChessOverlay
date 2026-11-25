@@ -681,6 +681,7 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         DebugLog.i(TAG, "overlay closing")
+        analyst?.let { a -> runCatching { a.logStats() } }
         running = false
         auto = false
         work.removeCallbacksAndMessages(null)

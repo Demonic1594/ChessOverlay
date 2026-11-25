@@ -29,6 +29,24 @@ class Board private constructor(
 
     operator fun get(square: Int): Char = sq[square]
 
+    /** A copy with some squares changed (piece letter, or '.' for empty). */
+    fun with(vararg changes: Pair<Int, Char>): Board =
+        Board(sq.copyOf().also { c -> for ((i, p) in changes) c[i] = p }, rights, ep, epKnown, halfmoves)
+
+    /**
+     * This board, knowing that `uci` was the last move (seen on the screen,
+     * not followed): after a pawn's two-square advance the en passant square
+     * is known, after any other move that there is none.
+     */
+    fun afterSeenMove(uci: String): Board {
+        if (!isMove(uci)) return this
+        val from = squareOf(uci.substring(0, 2))
+        val to = squareOf(uci.substring(2, 4))
+        val p = sq[to]
+        val double = (p == 'P' && to - from == 16) || (p == 'p' && from - to == 16)
+        return Board(sq.copyOf(), rights, if (double) (from + to) / 2 else NO_EP, true, halfmoves)
+    }
+
     /** FEN piece placement (first field). */
     fun placement(): String {
         val sb = StringBuilder()

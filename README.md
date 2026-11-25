@@ -175,7 +175,9 @@ The settings are named only; what each does is in the Help dialog. The board in 
 
 ### What a picture cannot tell
 
-Recognition reads the pieces, not the move history. In a game the overlay follows, castling rights, the en passant square and the halfmove clock follow the moves. For a position it jumps to directly (the move list, a game joined late), castling is taken to be possible while king and rook stand on their squares, and whether a pawn has just advanced two squares is unknown. Without auto mode, the side to move is the side at the bottom unless a king is in check; the **Side** control overrides it.
+Recognition reads the pieces, not the move history. In a game the overlay follows, castling rights, the en passant square and the halfmove clock follow the moves. For a position it jumps to directly (the move list, a game joined late), castling is taken to be possible while king and rook stand on their squares, and whether a pawn has just advanced two squares is unknown, unless the site highlights the last move (see below). Without auto mode and without such a highlight, the side to move is the side at the bottom unless a king is in check; the **Side** control overrides it.
+
+Most sites tint the two squares of the last move. When a read shows exactly two tinted squares, one empty and one holding a piece that could have come from it, that piece's colour moved last: this gives the side to move on a first read, after a jump in the move list or for a game joined late, puts a guessed side right, and shows whether a pawn has just advanced two squares (the en passant square). The tint's colour and which side is at the bottom do not matter; no highlight, or more marks than a last move, means nothing is assumed.
 
 The full guide, with every part of the screen, is in [docs/usage.md](docs/usage.md).
 

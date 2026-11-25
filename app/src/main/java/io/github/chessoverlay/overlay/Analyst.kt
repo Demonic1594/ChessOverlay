@@ -10,6 +10,7 @@ import io.github.chessoverlay.engine.LineStabilizer
 import io.github.chessoverlay.engine.PvLine
 import io.github.chessoverlay.vision.BoardTracker
 import io.github.chessoverlay.vision.Img
+import io.github.chessoverlay.vision.ReadStats
 import io.github.chessoverlay.vision.Recognizer
 import io.github.chessoverlay.vision.plausibleBoard
 import java.util.concurrent.Executors
@@ -176,6 +177,11 @@ class Analyst(
     /** The position analysed from a move seen at once, until look() has checked it. */
     private var fastShown: BoardTracker.Result.Position? = null
 
+    /** How reading went this session; a line in the log every ReadStats.EVERY positions and at the end. */
+    val stats = ReadStats()
+
+    fun logStats() = DebugLog.i(TAG, "session: ${stats.summary()}")
+
     /**
      * Analyse at once the move(s) the changed squares show (see
      * BoardTracker.explainChange), before the recognizer: look() then reads
@@ -190,6 +196,7 @@ class Analyst(
         val moves = tracker.explainChange(px, cover) ?: return false
         val r = tracker.applyFast(moves)
         fastShown = r
+        stats.seenAtOnce()
         DebugLog.i(TAG, "seen at once: ${moves.joinToString(" ")} in ${(System.nanoTime() - t0) / 1_000_000} ms")
         start(r.board, r.whiteToMove, r.move, r.previous, r.previousWhiteToMove)
         return true
@@ -227,6 +234,7 @@ class Analyst(
             return Look.FAILED
         }
         val ms = (System.nanoTime() - t0) / 1_000_000
+        stats.read(ms)
         DebugLog.i(TAG, "read ${if (located) "after locating" else "at known corners"} ($changed squares changed) in $ms ms " +
             "[${recognizer.lastTiming}]: " +
             "${rec.placement} ${if (rec.blackAtBottom) "black" else "white"} at bottom, sure ${(rec.confidence * 100).toInt()}%, " +
@@ -241,6 +249,7 @@ class Analyst(
             rec = rec.copy(confidence = 0f)
         }
         if (rec.confidence < minConfidence) {
+            stats.noBoard()
             DebugLog.i(TAG, "no clear board (${(rec.confidence * 100).toInt()}%)")
             // Three times in a row in auto mode: the board has gone (another
             // screen); drop it, so no arrows hang over something else.
@@ -258,6 +267,8 @@ class Analyst(
         }
         lostReads = 0
         var r = tracker.accept(img, rec, sideOverride, strict = auto)
+        tracker.lastSeen?.let { DebugLog.i(TAG, "last move highlighted: ${it.move} by ${if (it.moverWhite) "White" else "Black"}") }
+        if (tracker.lastSeen != null && fast == null && r is BoardTracker.Result.Position && r.move == null) stats.sideFromHighlight()
         if (r is BoardTracker.Result.Invalid && !located) {
             // Impossible at the old corners: maybe the board is somewhere else
             // now (a site's opening animation, a scroll). Look for it before
@@ -274,6 +285,7 @@ class Analyst(
                 r.board.placement() == fast.board.placement()
             when {
                 confirmed -> {
+                    stats.confirmed()
                     // Already analysed; only the drawing may need turning round.
                     synchronized(lock) {
                         val s = state
@@ -287,12 +299,15 @@ class Analyst(
                     return Look.INVALID
                 }
                 r is BoardTracker.Result.Same -> {
+                    stats.corrected()
                     DebugLog.w(TAG, "the move seen at once (${fast.move ?: "two moves"}) was wrong: the board did not change")
                     start(tracker.board!!, tracker.whiteToMove, null, null, true)
                     return Look.NEW
                 }
-                r is BoardTracker.Result.Position ->
+                r is BoardTracker.Result.Position -> {
+                    stats.corrected()
                     DebugLog.w(TAG, "the move seen at once (${fast.move ?: "two moves"}) was wrong: the reading says ${r.move ?: r.board.placement()}")
+                }
             }
         }
         return when (r) {
@@ -313,6 +328,7 @@ class Analyst(
                 // Almost always a misread (a piece caught mid-animation, a
                 // dragged piece): in auto mode keep the last analysis and
                 // let the next check try again.
+                stats.misread()
                 DebugLog.i(TAG, "not analysable: ${r.reason} (${rec.placement})")
                 if (!auto) publish(state.copy(status = "Board misread (${r.reason}); try ▶ again"))
                 Look.INVALID
@@ -365,6 +381,8 @@ class Analyst(
         // shown dimmed at once, so the arrows are not gone until the search's own lines come.
         val expected = if (previous != null && move != null && previousWhite != white && !s.provisional &&
             s.board?.placement() == previous.placement()) Continuation.after(s.lines, move) else null
+        stats.position()
+        if (stats.positions() % ReadStats.EVERY == 0) logStats()
         DebugLog.i(TAG, "analyse $fen" + (move?.let { " after $it" } ?: "") + noteOf(tracker) + (if (fast) " (fast game)" else "") +
             (if (expected != null) "; expected: ${expected.pv.joinToString(" ")}" else ""))
         publish(OverlayState(

@@ -31,6 +31,10 @@ import kotlin.math.max
  *   often the position came up ([repetitions]). A position never seen
  *   before is read from its pieces: castling is then taken to be possible
  *   while king and rook stand on their squares.
+ * - What the site shows: a clear last-move highlight (LastMoveHighlight)
+ *   gives the side to move where nothing else does (a first read, a jump,
+ *   a game joined late), puts a guessed side right, and tells whether a
+ *   pawn just advanced two squares.
  * - Moves seen at once ([explainChange]): which squares changed, and the
  *   legal moves, usually leave exactly one move (or a move and its reply)
  *   that explains them. That is known within a millisecond of the board
@@ -50,6 +54,9 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
         private set
     /** The last move linked (UCI): sites highlight its squares. */
     var lastMove: String? = null
+        private set
+    /** The site's last-move highlight in the last read, when it was clear (see LastMoveHighlight). */
+    var lastSeen: LastMoveHighlight.Seen? = null
         private set
 
     /** A position the game went through, as it was taken then. */
@@ -296,9 +303,14 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
         } catch (e: IllegalArgumentException) {
             return Result.Invalid(e.message ?: "bad board")
         }
-        // The same pieces as before: the same position (perhaps turned round), the same game.
+        // The site's last-move highlight says who moved last, when it is clear.
+        val hl = LastMoveHighlight.find(img, rec.corners, read, black)
+        lastSeen = hl
+        // The same pieces as before: the same position (perhaps turned round), the same game;
+        // unless the side to move was only guessed and the highlight shows the other.
         val sameBoard = prev != null && read.placement() == prev.placement()
-        if (sameBoard && sideOverride == null) {
+        val hlCorrects = hl != null && !sideKnown && !hl.moverWhite != prevWhite
+        if (sameBoard && sideOverride == null && !hlCorrects) {
             corners = rec.corners
             blackAtBottom = black
             remember(img, rec.corners)
@@ -323,7 +335,7 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
         // picture cannot show (the side to move, the castling rights).
         val at = if (played || sameBoard) -1 else history.indexOfLast { it.placement == read.placement() }
         val seen = if (at >= 0) history[at] else null
-        val b = if (playedMoves != null && prev != null) {
+        val b0 = if (playedMoves != null && prev != null) {
             // The new position is the old one after its move: that keeps the
             // castling rights, the en passant square and the move count.
             prev.copy().also { x -> playedMoves.forEach { x.play(it) } }
@@ -334,8 +346,12 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
             moves != null && moves.isNotEmpty() -> Board.fromPlacement(read.placement())
             else -> read
         }
+        // A position not followed move by move: the highlighted move tells
+        // what the picture alone cannot, whether a pawn just advanced two squares.
+        val useHl = hl != null && playedMoves == null && seen == null
+        val b = if (useHl) b0.afterSeenMove(hl!!.move) else b0
         val diff = if (prev == null) 64 else (0..63).count { prev[it] != b[it] }
-        if (prev != null && playedMoves == null && strict && sideOverride == null) {
+        if (prev != null && playedMoves == null && strict && sideOverride == null && !sameBoard) {
             if (diff <= SMALL_CHANGE && suspect != b.placement()) {
                 suspect = b.placement()
                 return Result.Invalid("no move explains it; reading again")
@@ -348,6 +364,8 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
         val prefer: Boolean = sideOverride ?: seen?.takeIf { it.sideKnown }?.whiteToMove ?: when {
             move != null -> !b[Board.squareOf(move.substring(2, 4))].isUpperCase()
             playedMoves != null -> prevWhite   // a move and the reply that came with it
+            // What the site shows: the colour of the piece on the highlighted square moved last.
+            hl != null -> !hl.moverWhite
             b.placement() == START -> true   // a new game: White begins, whichever side is at the bottom
             // In a game whose side to move is known, that side is to move again.
             backMove != null && sideKnown -> backMove == true
@@ -372,7 +390,7 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
         // is the start position, when a check forced it (the side preferred was
         // impossible), or when a piece going back showed it.
         val known = sideOverride != null || playedMoves != null || b.placement() == START ||
-            b.problem(prefer) != null || (backMove != null && oldKnown)
+            b.problem(prefer) != null || (backMove != null && oldKnown) || (hl != null && white == !hl.moverWhite)
         if (sameBoard) {
             sideKnown = known
             repetitions = 1 + history.count { it.board.samePosition(b, white) }
@@ -401,7 +419,7 @@ class BoardTracker(private val clock: () -> Long = System::currentTimeMillis) {
         }
         board = b
         whiteToMove = white
-        lastMove = playedMoves?.lastOrNull() ?: seen?.lastMove
+        lastMove = playedMoves?.lastOrNull() ?: seen?.lastMove ?: hl?.move
         return Result.Position(b, white, move, prev, prevWhite, back = seen != null)
     }
 
