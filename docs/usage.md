@@ -103,7 +103,7 @@ An engine that supports `MultiPV` is asked for as many lines as the *Lines* sett
 |---|---|
 | Test the engine | Starts the engine as the overlay does, with your options and under the same supervision, analyses a test position for a few seconds and says what happened. |
 | Test recognition | Times a read of a test board with each way of running the models on this phone, shows the table and keeps the fastest that reads the board as the default does. |
-| Copy the debug log | Copies the log to the clipboard. It holds the last 600 lines: every read with its timing and what it found, and every engine event. |
+| Copy the debug log | Copies the log to the clipboard. It holds the last 600 lines: every read with its timing and what it found, and every engine event. Every 25 positions and when the overlay closes, a `session:` line sums up the session: moves seen at once from the changed squares and how many the recognizer confirmed or corrected, the reads' median and 90th-percentile times, the side to move taken from the highlight, misreads. |
 | Share the last misread screen | Shares the screen of the last misread, as the app saw it. A screen is kept only when a board was read wrongly twice in a row. |
 | Clear the log | Empties the debug log. |
 
@@ -123,3 +123,4 @@ Recognition reads the pieces, not the move history.
 - For a position the overlay jumps to (the move list, a game joined late), castling is taken to be possible while king and rook stand on their squares, and whether a pawn has just advanced two squares is unknown.
 - Without auto mode, the side to move is the side at the bottom unless a king is in check. The **Side** control overrides it.
 - A step back in the move list, or an undo, takes the position as the game had it, as far back as the game was followed.
+- The site's last-move highlight fills these gaps where it is clear: exactly two tinted squares, one empty and one holding a piece that could have come from it, say that piece's colour moved last. That gives the side to move after a jump, on a first read or without auto mode, and the en passant square after a pawn's double step. The tint's colour does not matter; no highlight, or more marks than a last move (a premove, your own arrows), means nothing is assumed.
