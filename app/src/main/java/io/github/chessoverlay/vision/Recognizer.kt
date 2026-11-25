@@ -129,15 +129,16 @@ class Recognizer(boardModel: File, locatorModel: File, val mode: RecognizerMode 
 
     /** Board corners (TL, TR, BR, BL) in image pixels. */
     fun locate(img: Img): List<FloatArray> {
-        val rough = locateOnce(img)
-        val (crop, ox, oy) = refineCrop(img, cornersToBox(rough))
-        return locateOnce(crop).map { floatArrayOf(it[0] + ox, it[1] + oy) }
+        val rough = locateOnce(img, 0, 0, img.w, img.h)
+        val r = refineBox(img, cornersToBox(rough))
+        return locateOnce(img, r[0], r[1], r[2] - r[0], r[3] - r[1]).map { floatArrayOf(it[0] + r[0], it[1] + r[1]) }
     }
 
-    private fun locateOnce(img: Img): List<FloatArray> {
-        val side = max(img.w, img.h)
+    /** The locator on the region (x0, y0, w, h) of `img`, padded to a square with black at the right or bottom. */
+    private fun locateOnce(img: Img, x0: Int, y0: Int, w: Int, h: Int): List<FloatArray> {
+        val side = max(w, h)
         val x = FloatArray(3 * LOC_SIZE * LOC_SIZE)
-        img.padSquare(side).resize(LOC_SIZE, LOC_SIZE).toTensor(x)
+        img.resizeRegion(x0, y0, side, side, LOC_SIZE, LOC_SIZE, w, h).toTensor(x)
         OnnxTensor.createTensor(env, FloatBuffer.wrap(x), longArrayOf(1, 3, LOC_SIZE.toLong(), LOC_SIZE.toLong())).use { t ->
             locator.run(mapOf("image" to t)).use { out ->
                 @Suppress("UNCHECKED_CAST")
@@ -168,13 +169,13 @@ class Recognizer(boardModel: File, locatorModel: File, val mode: RecognizerMode 
         fun cornersToBox(c: List<FloatArray>) =
             floatArrayOf(c.minOf { it[0] }, c.minOf { it[1] }, c.maxOf { it[0] }, c.maxOf { it[1] })
 
-        /** Region around a rough box for the locator's second pass. */
-        fun refineCrop(img: Img, box: FloatArray, margin: Float = 0.1f): Triple<Img, Int, Int> {
+        /** Region (x0, y0, x1, y1) around a rough box for the locator's second pass. */
+        fun refineBox(img: Img, box: FloatArray, margin: Float = 0.1f): IntArray {
             val bw = box[2] - box[0]; val bh = box[3] - box[1]
             var x0 = max(0, (box[0] - margin * bw).toInt()); var y0 = max(0, (box[1] - margin * bh).toInt())
             var x1 = min(img.w, (box[2] + margin * bw).toInt()); var y1 = min(img.h, (box[3] + margin * bh).toInt())
             if (x1 - x0 < 32 || y1 - y0 < 32) { x0 = 0; y0 = 0; x1 = img.w; y1 = img.h }
-            return Triple(img.crop(x0, y0, x1, y1), x0, y0)
+            return intArrayOf(x0, y0, x1, y1)
         }
 
         fun isAxisAligned(c: List<FloatArray>, tol: Float = 0.006f): Boolean {
@@ -192,7 +193,8 @@ class Recognizer(boardModel: File, locatorModel: File, val mode: RecognizerMode 
         fun boardInput(img: Img, corners: List<FloatArray>): Img {
             if (isAxisAligned(corners)) {
                 val b = cornersToBox(corners)
-                return img.crop(pyRound(b[0]), pyRound(b[1]), pyRound(b[2]), pyRound(b[3])).resize(BOARD_SIZE, BOARD_SIZE)
+                val x0 = pyRound(b[0]); val y0 = pyRound(b[1])
+                return img.resizeRegion(x0, y0, max(0, pyRound(b[2]) - x0), max(0, pyRound(b[3]) - y0), BOARD_SIZE, BOARD_SIZE)
             }
             return warp(img, corners)
         }
