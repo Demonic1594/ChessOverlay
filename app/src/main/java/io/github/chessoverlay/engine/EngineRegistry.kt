@@ -9,8 +9,11 @@ import android.os.Build
 import org.xmlpull.v1.XmlPullParser
 import java.io.File
 
-/** An engine the app can start. `id` is stable across launches. */
-data class EngineInfo(val id: String, val title: String, val file: File, val kind: Kind) {
+/**
+ * An engine the app can start. `id` is stable across launches.
+ * `alternative`: another build of it to start if `file` cannot run here.
+ */
+data class EngineInfo(val id: String, val title: String, val file: File, val kind: Kind, val alternative: File? = null) {
     enum class Kind { BUNDLED, OPEN_EXCHANGE, IMPORTED }
 }
 
@@ -31,11 +34,22 @@ class EngineRegistry(private val ctx: Context) {
 
     fun all(): List<EngineInfo> = bundled() + openExchange() + imported()
 
+    /**
+     * The engines in the APK. Smotherfish comes in two builds: the faster
+     * one (Armv8.2 dot product, most phones from about 2019 on) where the CPU
+     * has those instructions, the plain one elsewhere. Both are one engine
+     * to the user, with one id and one set of options; the plain build is
+     * the alternative if the faster one does not run after all.
+     */
     fun bundled(): List<EngineInfo> {
         val dir = File(ctx.applicationInfo.nativeLibraryDir)
-        return (dir.listFiles() ?: emptyArray())
-            .filter { it.name.startsWith("lib") && it.name.endsWith(".so") && it.name in BUNDLED_TITLES }
-            .map { EngineInfo("bundled:${it.name}", BUNDLED_TITLES.getValue(it.name), it, EngineInfo.Kind.BUNDLED) }
+        val files = (dir.listFiles() ?: emptyArray()).filter { it.isFile }.associateBy { it.name }
+        val plain = files[SMOTHERFISH]
+        val fast = files[SMOTHERFISH_DOTPROD]?.takeIf { CpuFeatures.hasDotProd() }
+        val out = ArrayList<EngineInfo>()
+        if (fast != null) out += EngineInfo("bundled:$SMOTHERFISH", "Smotherfish (built in)", fast, EngineInfo.Kind.BUNDLED, plain)
+        else if (plain != null) out += EngineInfo("bundled:$SMOTHERFISH", "Smotherfish (built in)", plain, EngineInfo.Kind.BUNDLED)
+        return out
     }
 
     fun imported(): List<EngineInfo> {
@@ -141,6 +155,8 @@ class EngineRegistry(private val ctx: Context) {
     companion object {
         const val OEX_ACTION = "intent.chess.provider.ENGINE"
         /** Engines shipped in the APK (file name in jniLibs -> title). */
-        val BUNDLED_TITLES = mapOf("libsmotherfish.so" to "Smotherfish (built in)")
+        /** The bundled builds: plain Armv8 and Armv8.2 with dot product (jniLibs, so installed executable). */
+        const val SMOTHERFISH = "libsmotherfish.so"
+        const val SMOTHERFISH_DOTPROD = "libsmotherfish_dotprod.so"
     }
 }

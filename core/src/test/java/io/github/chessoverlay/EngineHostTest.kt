@@ -221,4 +221,53 @@ class EngineHostTest {
         assertTrue("before the third search: $said", said.withIndex().count { (i, l) -> l.startsWith("go") && i > ng } == 1)
         dir.deleteRecursively()
     }
+
+    private fun script(dir: File, name: String, body: String): File =
+        File(dir, name).apply { writeText("#!/bin/sh\n" + body.trimIndent() + "\n"); setExecutable(true) }
+
+    private val good = """
+        while read -r line; do
+          case "${'$'}line" in
+            uci) echo "id name Plain"; echo uciok ;;
+            isready) echo readyok ;;
+            go*) echo "info depth 5 seldepth 5 multipv 1 score cp 20 nodes 100 pv e2e4" ;;
+            stop) echo "bestmove e2e4" ;;
+            quit) exit 0 ;;
+          esac
+        done
+    """
+
+    /**
+     * The faster build on a CPU without its instructions: killed by SIGILL,
+     * at the first search or before it answers "uci". The host moves to the
+     * plain build and the lines come; the user is not told of a crash.
+     */
+    @Test fun anIllegalInstructionMovesToThePlainBuild() {
+        for (whenDies in listOf("go", "uci")) {
+            val dir = createTempDir("sigill")
+            val fast = script(dir, "fast.sh", """
+                while read -r line; do
+                  case "${'$'}line" in
+                    $whenDies*) kill -ILL ${'$'}${'$'} ;;
+                    uci) echo "id name Fast"; echo uciok ;;
+                    isready) echo readyok ;;
+                  esac
+                done
+            """)
+            val plain = script(dir, "plain.sh", good)
+            val updates = CopyOnWriteArrayList<AnalysisUpdate>()
+            val status = CopyOnWriteArrayList<String>()
+            EngineHost(fast, dir, emptyMap(), onUpdate = { updates.add(it) }, onStatus = { status.add(it) },
+                alternative = plain).use { host ->
+                host.analyse("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 1, 0)
+                val until = System.currentTimeMillis() + 10_000
+                while (System.currentTimeMillis() < until && updates.none { it.lines.isNotEmpty() }) Thread.sleep(50)
+                assertTrue("lines from the plain build ($whenDies); status $status\n${DebugLog.dump().takeLast(1500)}",
+                    updates.any { it.lines.isNotEmpty() })
+                assertTrue(host.executable == plain)
+                assertTrue("no crash shown ($whenDies): $status", status.none { "stopped" in it || "Could not" in it })
+            }
+            dir.deleteRecursively()
+        }
+    }
 }

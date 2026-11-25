@@ -38,8 +38,13 @@ class EngineOptionsActivity : AppCompatActivity() {
             if (info == null) { runOnUiThread { done("No engine found") }; return@thread }
             runOnUiThread { findViewById<TextView>(R.id.engineName).text = info.title }
             try {
-                val e = UciEngine(info.file, reg.workDir)
-                e.start()
+                // The faster build may not run on this CPU: then the other one is asked.
+                val e = try {
+                    UciEngine(info.file, reg.workDir).also { it.start() }
+                } catch (first: Exception) {
+                    val alt = info.alternative ?: throw first
+                    UciEngine(alt, reg.workDir).also { it.start() }
+                }
                 val opts = e.options.toList()
                 val name = e.name
                 e.quit()

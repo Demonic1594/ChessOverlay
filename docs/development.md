@@ -29,7 +29,7 @@ The APK is written to `app/build/outputs/apk/release/app-release.apk`. Such a bu
   python3 tools/quantize_models.py models app/src/main/assets/models
   ```
   Without them the APK is smaller, and the app downloads the original models, about 170 MB, the first time the **Models** chip is tapped.
-- **Engine.** CI builds Smotherfish and copies it to `app/src/main/jniLibs/arm64-v8a/libsmotherfish.so`. Engines ship as `lib*.so` so that Android installs them as executable files. Without one, the app has no engine until an engine file is added.
+- **Engine.** CI copies Smotherfish's release builds to `app/src/main/jniLibs/arm64-v8a/libsmotherfish.so` (plain) and `libsmotherfish_dotprod.so` (dot product); for a local build, download them from the release page under those names (the plain one alone is enough). Engines ship as `lib*.so` so that Android installs them as executable files. Without one, the app has no engine until an engine file is added.
 - **Another ABI.** `-PextraAbi=x86_64` builds for an x86_64 emulator as well; it needs an x86_64 engine at `app/src/main/jniLibs/x86_64/libsmotherfish.so`.
 
 Models, engines and build output are not in the repository (`.gitignore`).
@@ -156,7 +156,7 @@ It needs JDK 17 or later and `tools/compile-classpath.txt`, the app's classpaths
 
 ## Bundling another engine
 
-CI builds Smotherfish from the commit named as `ENGINE_REF` in `.github/workflows/build.yml`, so that a build can be repeated and the APK's engine source is known. To try another branch, tag or commit, run the workflow by hand and give it as `engine_ref`. To move the app to a newer engine, change the commit in the workflow and in `THIRD_PARTY_NOTICES.md` together.
+CI bundles the Android builds of the Smotherfish release named as `ENGINE_RELEASE` in `.github/workflows/build.yml` (plain Armv8 as `libsmotherfish.so`, Armv8.2 dot product as `libsmotherfish_dotprod.so`), each checked against the SHA-256 pinned there, so that a build can be repeated and the APK's engine source is known. The app starts the dot-product build where the CPU has those instructions (`CpuFeatures`, from the kernel's HWCAP or `/proc/cpuinfo`) and the plain one elsewhere; if the faster build still fails to start or stops with "illegal instruction", `EngineHost` moves to the plain one by itself. To try another release, run the workflow by hand and give its tag as `engine_release` (its files are then checked against the release's own digests). To move the app to a newer engine, change the release, its two SHA-256 sums and `THIRD_PARTY_NOTICES.md` together. The emulator job builds an x86_64 engine from the release's tag, as releases have no Android x86_64 build.
 
 ## Versions and releases
 

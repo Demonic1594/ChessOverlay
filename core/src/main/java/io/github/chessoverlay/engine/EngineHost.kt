@@ -32,7 +32,7 @@ data class AnalysisUpdate(
  * with safer settings (see [fallback]); the overlay shows what happens.
  */
 class EngineHost(
-    private val executable: File,
+    executable: File,
     private val workDir: File,
     private val options: Map<String, String>,
     private val onUpdate: (AnalysisUpdate) -> Unit,
@@ -41,7 +41,16 @@ class EngineHost(
     private val silentMs: Long = SILENT_MS,
     /** Hash in MB unless the user set one (the app picks it from the phone's memory). */
     private val defaultHashMb: Int = 64,
+    /**
+     * Another build of the same engine to use if this one cannot run here
+     * (the faster dotprod build on a CPU without those instructions: it
+     * stops at once, "illegal instruction"). Used from then on.
+     */
+    private var alternative: File? = null,
 ) : AutoCloseable {
+    /** The binary started: `executable`, or `alternative` once that was needed. */
+    @Volatile var executable: File = executable
+        private set
     private val exec = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "engine-host").apply { isDaemon = true } }
     private val ids = AtomicLong(0)
     @Volatile private var engine: UciEngine? = null
@@ -226,9 +235,20 @@ class EngineHost(
             e
         } catch (ex: Exception) {
             DebugLog.e(TAG, "could not start ${executable.name}", ex)
+            if (useAlternative("it did not start")) return ensureEngine()
             onStatus("Could not start the engine: ${ex.message}")
             null
         }
+    }
+
+    /** Switches to the other build, once; false if there is none. */
+    private fun useAlternative(why: String): Boolean {
+        val alt = alternative ?: return false
+        alternative = null
+        DebugLog.w(TAG, "${executable.name}: $why; using ${alt.name} instead")
+        executable = alt
+        restartTimes.clear()
+        return true
     }
 
     /** Sends the options; returns them as "name=value" for the log. */
@@ -260,7 +280,13 @@ class EngineHost(
             if (crashesByFen.size >= 64) crashesByFen.clear()
             crashesByFen[r.fen] = (crashesByFen[r.fen] ?: 0) + 1
         }
-        onStatus("Engine stopped (code $code); restarting…")
+        // Killed by "illegal instruction" (SIGILL: 128 + 4, or 4 where the signal itself is given): a build this
+        // CPU cannot run, not a crash to retry.
+        if ((code == SIGILL_EXIT || code == SIGILL) && useAlternative("illegal instruction (exit code $code)")) {
+            crashesByFen.clear()
+        } else {
+            onStatus("Engine stopped (code $code); restarting…")
+        }
         // Resume the request that was running, unless a newer one is queued.
         if (r != null && r.id == ids.get()) run(r) else ensureEngine()
     }
@@ -270,5 +296,7 @@ class EngineHost(
         /** No search output this long after "go" = a silent engine. */
         const val SILENT_MS = 6_000L
         private const val MAX_FALLBACK = 3
+        private const val SIGILL = 4
+        private const val SIGILL_EXIT = 128 + SIGILL
     }
 }

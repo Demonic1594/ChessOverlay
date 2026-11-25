@@ -54,14 +54,16 @@ lists the components it is built from.
 
 The APK bundles Smotherfish, a fork of Stockfish
 (<https://stockfishchess.org>), both under the GNU General Public License,
-version 3 (<https://www.gnu.org/licenses/gpl-3.0.html>). CI builds the binary
-from <https://github.com/Demonic1594/Smotherfish> at the commit named as
-`ENGINE_REF` in `.github/workflows/build.yml`. The source of that commit is
-the source of the binary in the APK; when the commit there is changed, change
-it here too:
+version 3 (<https://www.gnu.org/licenses/gpl-3.0.html>): the two Android
+builds of a Smotherfish release (plain Armv8 and Armv8.2 with dot product),
+as published at <https://github.com/Demonic1594/Smotherfish/releases> and
+named as `ENGINE_RELEASE` in `.github/workflows/build.yml`. CI checks each
+file against its SHA-256 before bundling it. The source of the release's
+commit is the source of the binaries in the APK; when the release there is
+changed, change it here too:
 
-- <https://github.com/Demonic1594/Smotherfish/commit/33bbe36148e42b08e496027a48dc227212845ebd>
-  (the head of the branch `smotherfish` on 2026-11-23)
+- Smotherfish 1.5.1: <https://github.com/Demonic1594/Smotherfish/releases/tag/v1.5.1>,
+  source <https://github.com/Demonic1594/Smotherfish/commit/f01cf48e51ce3bf32ca712a07b3bf361b257149f>
 
 ## Android libraries
 

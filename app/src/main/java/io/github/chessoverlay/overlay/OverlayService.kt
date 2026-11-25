@@ -230,7 +230,7 @@ class OverlayService : Service() {
         val host = EngineHost(info.file, reg.workDir, prefs.engineOptions(info.id),
             onUpdate = { u -> ready?.onEngine(u) },
             onStatus = { s -> ready?.status(s) },
-            defaultHashMb = hashForPhone())
+            defaultHashMb = hashForPhone(), alternative = info.alternative)
         engine = host
         val rec = Recognizer(models.board, models.locator, howToRead(models, host))
         recognizer = rec

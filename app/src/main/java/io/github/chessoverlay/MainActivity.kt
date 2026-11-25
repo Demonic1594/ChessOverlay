@@ -348,7 +348,7 @@ class MainActivity : AppCompatActivity() {
             .show()
         thread(name = "engine-test") {
             val report = try {
-                EngineCheck.run(e.file, registry.workDir, prefs.engineOptions(e.id))
+                EngineCheck.run(e.file, registry.workDir, prefs.engineOptions(e.id), alternative = e.alternative)
             } catch (ex: Exception) {
                 DebugLog.e("EngineCheck", "test failed", ex)
                 EngineCheck.Report(false, "The test failed: ${ex.message}")
