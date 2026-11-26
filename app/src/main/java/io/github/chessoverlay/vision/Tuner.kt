@@ -25,8 +25,11 @@ import kotlin.math.abs
  * the table and keeps the result.
  */
 object Tuner {
-    /** The sample board the app ships, to measure on: gzipped "w h" and a newline, then RGB bytes. */
-    const val SAMPLE = "vision-sample.rgb.gz"
+    /**
+     * The sample board the app ships, to measure on: gzipped "w h" and a newline, then RGB bytes. Not named
+     * .gz: the APK build unpacks .gz assets and drops the ending, and the app then found no sample at all.
+     */
+    const val SAMPLE = "vision-sample.rgbz"
 
     fun sample(stream: InputStream): Img = Img.fromRgb(GZIPInputStream(stream).use { it.readBytes() })
 

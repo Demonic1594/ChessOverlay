@@ -243,7 +243,6 @@ class OverlayService : Service() {
         analyst = a
         ready = a
         if (destroyed) return   // closed while starting: onDestroy's cleanup on this thread closes what is made
-        probeCapture()
         host.start()
         DebugLog.i(TAG, "ready: ${info.title}, ${prefs.lines} lines, think ${prefs.thinkMs} ms")
         postState(OverlayState(status = if (prefs.autoStart) "Looking for a board…" else "Tap ▶ to read the screen, A for auto mode"))
@@ -355,48 +354,71 @@ class OverlayService : Service() {
     private var polledPts: Any? = null
 
     /**
-     * Whether our windows are in the screen capture (worker thread). A small magenta square is drawn for a
-     * moment and the capture looked at where it is: when the whole screen is shared it is there; when one app is
-     * shared (Android 14 and later lets the user choose), it is not, and reads need not hide the drawing.
+     * Whether our windows are in the screen capture (worker thread). A small magenta square is put up off the
+     * board, and the frames that come after it are looked at every PROBE_TICK_MS (CaptureProbe): when the whole
+     * screen is shared it is in them; when one app is shared (Android 14 and later lets the user choose), it is
+     * not, and reads need not hide the drawing. Nothing waits for the answer: reads and checks go on meanwhile.
      */
     private fun probeCapture() {
-        val s = screen ?: return
-        val x = screenW / 2; val y = screenH / 2
-        val r = intArrayOf(x - PROBE_PX / 2, y - PROBE_PX / 2, x + PROBE_PX / 2, y + PROBE_PX / 2)
-        probeDrawnAt = 0L
-        main.post { draw?.probe = r; probeDrawnAt = SystemClock.uptimeMillis() }
-        val t0 = SystemClock.uptimeMillis()
-        // A frame made after the square was put up: with the whole screen shared, the square brings one. With one
-        // app shared, only the app changing does (a clock ticking).
-        while (SystemClock.uptimeMillis() - t0 < PROBE_WAIT_MS) {
-            val drawn = probeDrawnAt
-            if (drawn > 0 && s.latestTime > drawn + 16) break
-            SystemClock.sleep(16)
+        if (!probe.mayStart || !shown || screen == null) return
+        val r = CaptureProbe.place(screenW, screenH, analyst?.board?.region(), windows.cardRect, PROBE_PX) ?: return
+        probeRect = r
+        probe.start(SystemClock.uptimeMillis())
+        main.post { draw?.probe = r; probe.drawn = SystemClock.uptimeMillis() }
+        work.removeCallbacks(probeTick)
+        work.postDelayed(probeTick, PROBE_TICK_MS)
+    }
+
+    private val probeTick = object : Runnable {
+        override fun run() {
+            if (destroyed) return
+            guarded("probe") { checkProbe() }
+            if (probe.running) work.postDelayed(this, PROBE_TICK_MS)
         }
-        val drawn = probeDrawnAt
-        val fresh = drawn > 0 && s.latestTime > drawn + 16
-        val xs = intArrayOf(x - 2, x + 2, x, x - 2, x + 2)
-        val ys = intArrayOf(y - 2, y - 2, y, y + 2, y + 2)
-        val px = if (fresh) s.pixels(xs, ys) else null
+    }
+
+    private fun checkProbe() {
+        val s = screen
+        val r = probeRect
+        if (s == null || r == null || !shown) {
+            // Hidden with the eye button, the square is not drawn: a frame without it would prove nothing.
+            probe.cancel(); main.post { draw?.probe = null }; probeAgain = true
+            return
+        }
+        val x = (r[0] + r[2]) / 2; val y = (r[1] + r[3]) / 2
+        val answer = probe.offer(SystemClock.uptimeMillis(), s.latestTime) {
+            val px = s.pixels(intArrayOf(x - 2, x + 2, x, x - 2, x + 2), intArrayOf(y - 2, y - 2, y, y + 2, y + 2))
+            px != null && px.count { p ->
+                maxOf(kotlin.math.abs((p shr 16 and 0xff) - 0xff), kotlin.math.abs(p shr 8 and 0xff),
+                    kotlin.math.abs((p and 0xff) - 0xff)) <= 24
+            } >= 4
+        } ?: return
         main.post { draw?.probe = null }
-        val shown = px != null && px.count { p ->
-            val d = maxOf(kotlin.math.abs((p shr 16 and 0xff) - 0xff), kotlin.math.abs(p shr 8 and 0xff),
-                kotlin.math.abs((p and 0xff) - 0xff))
-            d <= 24
-        } >= 4
-        // Clean only on a frame that came after the square was up and does not show it. No such frame: not known,
-        // so the careful way stays, and the probe is tried again once a board is read (its clock moves).
-        val clean = px != null && !shown
-        probeAgain = px == null
+        DebugLog.i(TAG, "capture probe: " + when (answer) {
+            CaptureProbe.Answer.IN_CAPTURE -> "square seen"
+            CaptureProbe.Answer.NOT_IN_CAPTURE -> "square not seen"
+            CaptureProbe.Answer.NOT_KNOWN -> "no new frame, not known"
+        })
+        // Clean only when two probes, at two moments, saw frames without the square (a window that came over it
+        // once, a notification, would otherwise pass for one app shared). Not known: tried again after a good read.
+        val clean = when (answer) {
+            CaptureProbe.Answer.IN_CAPTURE -> { notSeen = 0; false }
+            CaptureProbe.Answer.NOT_IN_CAPTURE -> ++notSeen >= 2
+            CaptureProbe.Answer.NOT_KNOWN -> cleanCapture
+        }
+        probeAgain = answer == CaptureProbe.Answer.NOT_KNOWN
+        if (answer == CaptureProbe.Answer.NOT_IN_CAPTURE && !clean) probeCapture()
         if (clean != cleanCapture) DebugLog.i(TAG, if (clean) "our windows are not in the capture (one app shared): reads take the frame as it is"
             else "our windows are in the capture: reads take the drawing off first")
         cleanCapture = clean
-        DebugLog.i(TAG, "capture probe: ${if (px == null) "no new frame, not known" else if (shown) "square seen" else "square not seen"}")
     }
 
-    @Volatile private var probeDrawnAt = 0L
-    /** The last probe saw no new frame: probe again after the next good read. */
-    private var probeAgain = false
+    private val probe = CaptureProbe()
+    private var probeRect: IntArray? = null
+    /** Probes that saw frames without the square, in a row. */
+    private var notSeen = 0
+    /** No probe has answered yet, or the last saw no new frame: probe after the next good read (a board is known then, so the square can go off it). */
+    private var probeAgain = true
 
     /** Before a board is known: whether the screen has been still a moment (see ScreenMotion). */
     private fun screenStill(now: Long): Boolean {
@@ -458,7 +480,7 @@ class OverlayService : Service() {
                         DebugCapture.save(this@OverlayService, img, "$r")
                     // A misread or no board: try again soon, then less often.
                     pacing.done(now, r, auto)
-                    if (probeAgain && r == Look.NEW) { probeAgain = false; probeCapture() }
+                    if (probeAgain && r == Look.NEW && !probe.running) { probeAgain = false; probeCapture() }
                 }
             }
           } finally {
@@ -543,7 +565,9 @@ class OverlayService : Service() {
         work.post {
             guarded("resize") {
                 screen?.resize(m.widthPixels, m.heightPixels, m.densityDpi)
-                probeCapture()
+                // The board moves: the probes start over once it is found again.
+                probe.reset(); notSeen = 0; probeAgain = true
+                main.post { draw?.probe = null }
                 analyst?.forget("Screen turned; looking for the board…")
                 watcher.reset()
                 pacing.reset()
@@ -633,9 +657,9 @@ class OverlayService : Service() {
         private const val BLIND_MS = 20_000L        // squares under our drawing: look this often
         private const val SLOW_CAPTURE_MS = 60L
         private const val HIDE_WAIT_MS = 250L
-        /** The capture probe's square, and how long a frame is waited for. */
+        /** The capture probe's square, and how often the frames after it are looked at. */
         private const val PROBE_PX = 12
-        private const val PROBE_WAIT_MS = 1_500L
+        private const val PROBE_TICK_MS = 40L
 
         fun start(ctx: Context, resultCode: Int, data: Intent) {
             ctx.startForegroundService(
